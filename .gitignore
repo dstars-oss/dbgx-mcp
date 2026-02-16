@@ -1,0 +1,29 @@
+# Build directories and CMake artifacts
+/build/
+/cmake-build-*/
+/out/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Testing/
+/compile_commands.json
+
+# Visual Studio/MSVC local files
+/.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+*.opendb
+
+# Python cache and tooling state
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.ruff_cache/
+
+# Local third-party checkout
+/3rdpart/WinDbg-Samples/
