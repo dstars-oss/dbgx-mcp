@@ -1,0 +1,158 @@
+# WinDbg MCP HTTP Extension (MVP)
+
+This repository contains a minimal WinDbg extension DLL written in C++ that exposes an MCP-compatible HTTP endpoint and a basic `windbg.eval` tool.
+
+## Goals
+
+- C++ WinDbg extension DLL.
+- No third-party dependencies (Windows and WinDbg libraries only).
+- CMake-based build.
+- Minimal MCP JSON-RPC methods:
+  - `initialize`
+  - `tools/list`
+  - `tools/call`
+- Basic tool:
+  - `windbg.eval`: execute any WinDbg command and return text output.
+
+## Build
+
+Prerequisites:
+
+- Windows
+- CMake 3.20+
+- MSVC toolchain (Visual Studio Build Tools)
+- WinDbg SDK headers/libs (`DbgEng.h`, `dbgeng.lib`)
+
+Configure and build:
+
+```powershell
+cmake -S . -B build -G "Ninja"
+cmake --build build
+```
+
+Run unit tests:
+
+```powershell
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+## Load In WinDbg
+
+Load extension:
+
+```text
+.load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/windbg_mcp_extension.dll"
+```
+
+Important: prefer forward slashes in the `.load` path. In debugger command contexts, backslashes can be treated as
+escape characters and path separators may be stripped, which produces
+`Win32 error 0n2` (`The system cannot find the file specified`).
+
+After loading, the extension starts a local HTTP endpoint at:
+
+```text
+http://127.0.0.1:5678/mcp
+```
+
+## MCP Calls
+
+### initialize
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-11-25"
+  }
+}
+```
+
+### tools/list
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+### tools/call (windbg.eval)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "windbg.eval",
+    "arguments": {
+      "command": "r eax"
+    }
+  }
+}
+```
+
+## Security Notes (MVP)
+
+- Binds to `127.0.0.1` only.
+- Validates `Origin` when present, allowing only `http://localhost...` and `http://127.0.0.1...`.
+- Supports HTTP `POST /mcp` for JSON-RPC.
+- `GET /mcp` returns 405 in this MVP (no SSE stream yet).
+
+## Troubleshooting `.load` Failures
+
+1. Confirm the DLL path exists and is absolute.
+2. Verify required exports are present:
+
+```powershell
+cmake --build build --config Debug --target check_windbg_exports
+```
+
+3. Run export checks in test flow:
+
+```powershell
+ctest --test-dir build -C Debug --output-on-failure -R verify_windbg_exports
+```
+
+4. If loading still fails, inspect dependent modules:
+
+```powershell
+dumpbin /dependents build\Debug\windbg_mcp_extension.dll
+```
+
+Common errors:
+- `Win32 error 0n2`: path is wrong or path separators were parsed incorrectly.
+- `Win32 error 0n126`: dependent module not found in current environment.
+
+## Minimal Manual Acceptance (WinDbg)
+
+1. Build Debug binaries.
+2. Run `verify_windbg_exports` checks.
+3. In WinDbg/CDB, execute `.load` with the forward-slash absolute path format shown above.
+4. Run `.chain` and confirm `windbg_mcp_extension` appears.
+5. If load fails, follow the troubleshooting steps.
+
+## Unit Test Policy (MVP)
+
+- Test pure logic first: JSON parsing and JSON-RPC routing.
+- Keep WinDbg and socket operations in thin adapters.
+- Every key behavior in the spec maps to at least one test.
+
+### Spec-to-Test Mapping
+
+| Spec Scenario | Unit Test |
+| --- | --- |
+| `初始化请求成功` | `TestInitialize` |
+| `工具列表请求成功` | `TestToolsList` |
+| `命令执行成功` | `TestToolsCallSuccess` |
+| `缺少命令参数` | `TestToolsCallMissingCommand` |
+| `未知方法被拒绝` | `TestUnknownMethod` |
+| `导出符号检查通过` | `verify_windbg_exports` |
+| `缺失导出被阻断` | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
+| `路径写法可直接复用` | `Load In WinDbg` command examples |
+| `加载失败有诊断指引` | `Troubleshooting .load Failures` section |
+| Invalid JSON handling | `TestParseError` |

@@ -1,0 +1,7 @@
+LIBRARY windbg_mcp_extension
+
+EXPORTS
+  DebugExtensionInitialize
+  DebugExtensionCanUnload
+  DebugExtensionUninitialize
+  DebugExtensionUnload
