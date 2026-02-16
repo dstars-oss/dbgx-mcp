@@ -1,5 +1,7 @@
 # WinDbg MCP HTTP Extension (MVP)
 
+Language: English | [简体中文](README.zh-CN.md)
+
 This repository contains a minimal WinDbg extension DLL written in C++ that exposes an MCP-compatible HTTP endpoint and a basic `windbg.eval` tool.
 
 ## Goals
@@ -36,7 +38,7 @@ Run unit tests:
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-## Load In WinDbg
+## Load in WinDbg
 
 Load extension:
 
@@ -44,9 +46,7 @@ Load extension:
 .load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/windbg_mcp_extension.dll"
 ```
 
-Important: prefer forward slashes in the `.load` path. In debugger command contexts, backslashes can be treated as
-escape characters and path separators may be stripped, which produces
-`Win32 error 0n2` (`The system cannot find the file specified`).
+Important: prefer forward slashes in the `.load` path. In debugger command contexts, backslashes can be treated as escape characters and path separators may be stripped, which produces `Win32 error 0n2` (`The system cannot find the file specified`).
 
 After loading, the extension starts a local HTTP endpoint at:
 
@@ -56,7 +56,7 @@ http://127.0.0.1:5678/mcp
 
 ## MCP Calls
 
-### initialize
+### `initialize`
 
 ```json
 {
@@ -69,7 +69,7 @@ http://127.0.0.1:5678/mcp
 }
 ```
 
-### tools/list
+### `tools/list`
 
 ```json
 {
@@ -80,7 +80,7 @@ http://127.0.0.1:5678/mcp
 }
 ```
 
-### tools/call (windbg.eval)
+### `tools/call` (`windbg.eval`)
 
 ```json
 {
@@ -103,7 +103,7 @@ http://127.0.0.1:5678/mcp
 - Supports HTTP `POST /mcp` for JSON-RPC.
 - `GET /mcp` returns 405 in this MVP (no SSE stream yet).
 
-## Troubleshooting `.load` Failures
+## Troubleshooting `.load` failures
 
 1. Confirm the DLL path exists and is absolute.
 2. Verify required exports are present:
@@ -126,33 +126,33 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 
 Common errors:
 - `Win32 error 0n2`: path is wrong or path separators were parsed incorrectly.
-- `Win32 error 0n126`: dependent module not found in current environment.
+- `Win32 error 0n126`: dependent module not found in the current environment.
 
-## Minimal Manual Acceptance (WinDbg)
+## Minimal manual acceptance (WinDbg)
 
 1. Build Debug binaries.
 2. Run `verify_windbg_exports` checks.
 3. In WinDbg/CDB, execute `.load` with the forward-slash absolute path format shown above.
 4. Run `.chain` and confirm `windbg_mcp_extension` appears.
-5. If load fails, follow the troubleshooting steps.
+5. If loading fails, follow the troubleshooting steps.
 
-## Unit Test Policy (MVP)
+## Unit test policy (MVP)
 
 - Test pure logic first: JSON parsing and JSON-RPC routing.
 - Keep WinDbg and socket operations in thin adapters.
 - Every key behavior in the spec maps to at least one test.
 
-### Spec-to-Test Mapping
+### Spec-to-test mapping
 
-| Spec Scenario | Unit Test |
+| Spec scenario | Unit test |
 | --- | --- |
-| `初始化请求成功` | `TestInitialize` |
-| `工具列表请求成功` | `TestToolsList` |
-| `命令执行成功` | `TestToolsCallSuccess` |
-| `缺少命令参数` | `TestToolsCallMissingCommand` |
-| `未知方法被拒绝` | `TestUnknownMethod` |
-| `导出符号检查通过` | `verify_windbg_exports` |
-| `缺失导出被阻断` | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
-| `路径写法可直接复用` | `Load In WinDbg` command examples |
-| `加载失败有诊断指引` | `Troubleshooting .load Failures` section |
+| Initialize request succeeds | `TestInitialize` |
+| Tools list request succeeds | `TestToolsList` |
+| Command execution succeeds | `TestToolsCallSuccess` |
+| Missing command argument | `TestToolsCallMissingCommand` |
+| Unknown method is rejected | `TestUnknownMethod` |
+| Export symbol check passes | `verify_windbg_exports` |
+| Missing export is blocked | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
+| Load command path format is reusable | `Load in WinDbg` command examples |
+| Load failure has diagnostics | `Troubleshooting .load failures` section |
 | Invalid JSON handling | `TestParseError` |
