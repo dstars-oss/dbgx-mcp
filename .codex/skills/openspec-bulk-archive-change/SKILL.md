@@ -1,5 +1,12 @@
 ---
-description: 一次归档多个已完成的变更
+name: openspec-bulk-archive-change
+description: 一次归档多个已完成的变更。用于归档多个并行变更。
+license: MIT
+compatibility: 需要 openspec CLI。
+metadata:
+  author: openspec
+  version: "1.0"
+  generatedBy: "1.1.1-2"
 ---
 
 在单个操作中归档多个已完成的变更。
@@ -222,7 +229,7 @@ description: 一次归档多个已完成的变更
 ```
 ## 无需归档的变更
 
-未找到活动变更。使用 `/opsx-new` 创建新变更。
+未找到活动变更。使用 `/opsx:new` 创建新变更。
 ```
 
 **防护措施**

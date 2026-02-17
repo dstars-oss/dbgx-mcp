@@ -22,7 +22,7 @@ openspec-cn status --json 2>&1 || echo "NOT_INITIALIZED"
 ```
 
 **如果未初始化：**
-> OpenSpec尚未在此项目中设置。请先运行 `openspec-cn init`，然后返回 `/opsx-onboard`。
+> OpenSpec尚未在此项目中设置。请先运行 `openspec-cn init`，然后返回 `/opsx:onboard`。
 
 如果未初始化，请在此停止。
 
@@ -146,7 +146,7 @@ git log --oneline -10 2>/dev/null || echo "No git history"
 │   [可选：如果有帮助的ASCII图表]          │
 └─────────────────────────────────────────┘
 
-探索模式（`/opsx-explore`）用于这种思考——在实现之前进行调查。您可以在需要思考问题时随时使用它。
+探索模式（`/opsx:explore`）用于这种思考——在实现之前进行调查。您可以在需要思考问题时随时使用它。
 
 现在让我们创建一个变更来保存我们的工作。
 ```
@@ -459,19 +459,19 @@ openspec-cn archive "<name>"
 
 | 命令 | 做什么 |
 |---------|--------------|
-| `/opsx-explore` | 在工作之前/期间思考问题 |
-| `/opsx-new` | 开始新变更，逐步通过产出物 |
-| `/opsx-ff` | 快进：一次创建所有产出物 |
-| `/opsx-continue` | 继续处理现有变更 |
-| `/opsx-apply` | 实现变更中的任务 |
-| `/opsx-verify` | 验证实现是否匹配产出物 |
-| `/opsx-archive` | 归档完成的变更 |
+| `/opsx:explore` | 在工作之前/期间思考问题 |
+| `/opsx:new` | 开始新变更，逐步通过产出物 |
+| `/opsx:ff` | 快进：一次创建所有产出物 |
+| `/opsx:continue` | 继续处理现有变更 |
+| `/opsx:apply` | 实现变更中的任务 |
+| `/opsx:verify` | 验证实现是否匹配产出物 |
+| `/opsx:archive` | 归档完成的变更 |
 
 ---
 
 ## 下一步是什么？
 
-尝试 `/opsx-new` 或 `/opsx-ff` 在您实际想要构建的内容上。您现在掌握了节奏！
+尝试 `/opsx:new` 或 `/opsx:ff` 在您实际想要构建的内容上。您现在掌握了节奏！
 ```
 
 ---
@@ -486,8 +486,8 @@ openspec-cn archive "<name>"
 没问题！您的变更保存在 `openspec/changes/<name>/`。
 
 要在以后继续：
-- `/opsx-continue <name>` - 恢复产出物创建
-- `/opsx-apply <name>` - 跳转到实现（如果任务存在）
+- `/opsx:continue <name>` - 恢复产出物创建
+- `/opsx:apply <name>` - 跳转到实现（如果任务存在）
 
 工作不会丢失。随时回来。
 ```
@@ -503,15 +503,15 @@ openspec-cn archive "<name>"
 
 | 命令 | 做什么 |
 |---------|--------------|
-| `/opsx-explore` | 思考问题（无代码更改） |
-| `/opsx-new <name>` | 开始新变更，逐步进行 |
-| `/opsx-ff <name>` | 快进：一次创建所有产出物 |
-| `/opsx-continue <name>` | 继续现有变更 |
-| `/opsx-apply <name>` | 实现任务 |
-| `/opsx-verify <name>` | 验证实现 |
-| `/opsx-archive <name>` | 完成后归档 |
+| `/opsx:explore` | 思考问题（无代码更改） |
+| `/opsx:new <name>` | 开始新变更，逐步进行 |
+| `/opsx:ff <name>` | 快进：一次创建所有产出物 |
+| `/opsx:continue <name>` | 继续现有变更 |
+| `/opsx:apply <name>` | 实现任务 |
+| `/opsx:verify <name>` | 验证实现 |
+| `/opsx:archive <name>` | 完成后归档 |
 
-尝试 `/opsx-new` 开始您的第一个变更，或 `/opsx-ff` 如果您想快速移动。
+尝试 `/opsx:new` 开始您的第一个变更，或 `/opsx:ff` 如果您想快速移动。
 ```
 
 优雅退出。

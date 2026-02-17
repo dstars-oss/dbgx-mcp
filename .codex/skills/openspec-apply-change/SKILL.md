@@ -22,7 +22,7 @@ metadata:
    - 如果只存在一个活动变更，自动选择
    - 如果不明确，运行 `openspec-cn list --json` 获取可用变更，并使用 **AskUserQuestion tool** 让用户选择
 
-   始终宣布：“正在使用变更：<name>”以及如何覆盖（例如，`/opsx-apply <other>`）。
+   始终宣布：“正在使用变更：<name>”以及如何覆盖（例如，`/opsx:apply <other>`）。
 
 2. **检查状态以了解 Schema**
    ```bash
