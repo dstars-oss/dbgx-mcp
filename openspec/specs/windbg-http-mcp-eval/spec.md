@@ -24,6 +24,8 @@
 #### 场景:工具列表请求成功
 - **当** 客户端发送 `tools/list` 请求
 - **那么** 服务必须返回包含 `windbg.eval` 的工具定义
+- **并且** `windbg.eval.description` 必须明确要求客户端按顺序逐条执行调试命令，禁止并行发起多个 `windbg.eval` 调用
+- **并且** `windbg.eval.inputSchema.properties.command.description` 必须包含“等待上一条命令执行完成后再发送下一条”的串行约束语义
 
 #### 场景:未知方法被拒绝
 - **当** 客户端发送未实现的 JSON-RPC 方法

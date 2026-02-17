@@ -192,6 +192,20 @@ def case_tools_list(
         isinstance(windbg_eval_dict.get("description"), str),
         "windbg.eval.description must be a string",
     )
+    description_value = windbg_eval_dict.get("description")
+    description_text = (
+        cast(str, description_value)
+        if isinstance(description_value, str)
+        else ""
+    )
+    expect(
+        "serial" in description_text.lower(),
+        "windbg.eval.description must require serial execution semantics",
+    )
+    expect(
+        "wait" in description_text.lower() and "next" in description_text.lower(),
+        "windbg.eval.description must require waiting before next command",
+    )
     input_schema = windbg_eval_dict.get("inputSchema")
     expect(isinstance(input_schema, dict), "windbg.eval.inputSchema must be an object")
     input_schema_dict = cast(dict[str, Any], input_schema)
@@ -215,6 +229,21 @@ def case_tools_list(
     expect(
         command_schema_dict.get("type") == "string",
         "windbg.eval.inputSchema.properties.command.type must be 'string'",
+    )
+    command_description = command_schema_dict.get("description")
+    command_description_text = (
+        cast(str, command_description)
+        if isinstance(command_description, str)
+        else ""
+    )
+    expect(
+        "one by one" in command_description_text.lower(),
+        "command description must require one-by-one execution",
+    )
+    expect(
+        "wait" in command_description_text.lower()
+        and "before" in command_description_text.lower(),
+        "command description must require waiting before the next command",
     )
 
     required = input_schema_dict.get("required")

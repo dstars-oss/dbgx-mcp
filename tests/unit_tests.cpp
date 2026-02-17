@@ -185,6 +185,18 @@ void TestToolsList(int* failures) {
 
   Expect(result.status_code == 200, "tools/list should return HTTP 200", failures);
   Expect(Contains(result.body, "\"name\":\"windbg.eval\""), "tools/list should include windbg.eval", failures);
+  Expect(
+      Contains(result.body, "clients MUST run calls serially"),
+      "tools/list should require clients to execute windbg.eval serially",
+      failures);
+  Expect(
+      Contains(result.body, "wait for each call to finish before sending the next"),
+      "tools/list should require waiting for each call before the next one",
+      failures);
+  Expect(
+      Contains(result.body, "send commands one by one and wait for completion before the next command"),
+      "tools/list command schema should include serial command guidance",
+      failures);
 }
 
 void TestToolsCallSuccess(int* failures) {
