@@ -2,59 +2,132 @@
 
 Language: English | [简体中文](README.zh-CN.md)
 
-This repository contains a minimal WinDbg extension DLL written in C++ that exposes an MCP-compatible HTTP endpoint and a basic `windbg.eval` tool.
+## Project Overview
 
-## Goals
+This project provides a minimal C++ WinDbg extension DLL that exposes an MCP-compatible HTTP endpoint (`/mcp`) and a basic `windbg.eval` tool.
 
-- C++ WinDbg extension DLL.
-- No third-party dependencies (Windows and WinDbg libraries only).
-- CMake-based build.
-- Minimal MCP JSON-RPC methods:
-  - `initialize`
-  - `tools/list`
-  - `tools/call`
-- Basic tool:
-  - `windbg.eval`: execute any WinDbg command and return text output.
+### Why use it
 
-## Build
+- Run WinDbg commands through a local MCP interface.
+- Integrate debugger operations into MCP clients and agent workflows.
+- Validate WinDbg + MCP integration with a small, dependency-light implementation.
 
-Prerequisites:
+### Who it is for
+
+- Engineers building MCP tooling around Windows debugging.
+- Teams that want scripted or agent-driven WinDbg command execution.
+- Contributors who need a small reference implementation before scaling features.
+
+### Typical scenarios
+
+- Execute `windbg.eval` from an MCP client to inspect register/memory state.
+- Build and test JSON-RPC routing for WinDbg-backed tools.
+- Verify extension loading, exported symbols, and request/response visibility in WinDbg.
+
+## Quick Start
+
+### Prerequisites
 
 - Windows
 - CMake 3.20+
 - MSVC toolchain (Visual Studio Build Tools)
 - WinDbg SDK headers/libs (`DbgEng.h`, `dbgeng.lib`)
 
-Configure and build:
+### 1. Build the extension
 
 ```powershell
 cmake -S . -B build -G "Ninja"
 cmake --build build
 ```
 
-Run unit tests:
+Expected result:
+- Build succeeds.
+- `build/Debug/windbg_mcp_extension.dll` is generated.
 
-```powershell
-ctest --test-dir build -C Debug --output-on-failure
-```
-
-## Load in WinDbg
-
-Load extension:
+### 2. Load the extension in WinDbg
 
 ```text
 .load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/windbg_mcp_extension.dll"
 ```
 
-Important: prefer forward slashes in the `.load` path. In debugger command contexts, backslashes can be treated as escape characters and path separators may be stripped, which produces `Win32 error 0n2` (`The system cannot find the file specified`).
+Expected result:
+- `.load` succeeds without `Win32 error`.
+- The extension starts a local endpoint at `http://127.0.0.1:5678/mcp`.
 
-After loading, the extension starts a local HTTP endpoint at:
+Important:
+- Use forward slashes in `.load` paths.
+- In debugger command contexts, backslashes may be treated as escapes, which can cause `Win32 error 0n2`.
+
+### 3. Verify extension presence
 
 ```text
-http://127.0.0.1:5678/mcp
+.chain
 ```
 
-## MCP Calls
+Expected result:
+- `windbg_mcp_extension` appears in the extension chain output.
+
+### 4. Send the first MCP request (`initialize`)
+
+```powershell
+$req = @{
+  jsonrpc = "2.0"
+  id = 1
+  method = "initialize"
+  params = @{ protocolVersion = "2025-11-25" }
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Uri "http://127.0.0.1:5678/mcp" -Method Post -ContentType "application/json" -Body $req
+```
+
+Expected result:
+- Response contains `jsonrpc`, matching `id`, and `result`.
+
+### 5. Run a debugger command via MCP (`tools/call`)
+
+```powershell
+$req = @{
+  jsonrpc = "2.0"
+  id = 2
+  method = "tools/call"
+  params = @{
+    name = "windbg.eval"
+    arguments = @{ command = "r eax" }
+  }
+} | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Uri "http://127.0.0.1:5678/mcp" -Method Post -ContentType "application/json" -Body $req
+```
+
+Expected result:
+- Response returns command output text from WinDbg.
+
+## Troubleshooting `.load` Failures
+
+1. Confirm the DLL path exists and is absolute.
+2. Verify required exports are present:
+
+```powershell
+cmake --build build --config Debug --target check_windbg_exports
+```
+
+3. Run export checks in test flow:
+
+```powershell
+ctest --test-dir build -C Debug --output-on-failure -R verify_windbg_exports
+```
+
+4. If loading still fails, inspect dependent modules:
+
+```powershell
+dumpbin /dependents build\Debug\windbg_mcp_extension.dll
+```
+
+Common errors:
+- `Win32 error 0n2`: wrong path or path separators were parsed incorrectly.
+- `Win32 error 0n126`: dependent module not found in the current environment.
+
+## MCP Request Reference
 
 ### `initialize`
 
@@ -103,42 +176,15 @@ http://127.0.0.1:5678/mcp
 - Supports HTTP `POST /mcp` for JSON-RPC.
 - `GET /mcp` returns 405 in this MVP (no SSE stream yet).
 
-## Troubleshooting `.load` failures
+## Build and Test Details
 
-1. Confirm the DLL path exists and is absolute.
-2. Verify required exports are present:
-
-```powershell
-cmake --build build --config Debug --target check_windbg_exports
-```
-
-3. Run export checks in test flow:
+Run unit tests:
 
 ```powershell
-ctest --test-dir build -C Debug --output-on-failure -R verify_windbg_exports
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-4. If loading still fails, inspect dependent modules:
-
-```powershell
-dumpbin /dependents build\Debug\windbg_mcp_extension.dll
-```
-
-Common errors:
-- `Win32 error 0n2`: path is wrong or path separators were parsed incorrectly.
-- `Win32 error 0n126`: dependent module not found in the current environment.
-
-## Minimal manual acceptance (WinDbg)
-
-1. Build Debug binaries.
-2. Run `verify_windbg_exports` checks.
-3. In WinDbg/CDB, execute `.load` with the forward-slash absolute path format shown above.
-4. Run `.chain` and confirm `windbg_mcp_extension` appears.
-5. Send a minimal `initialize` or `tools/call` request to `http://127.0.0.1:5678/mcp` and confirm WinDbg output shows request/response summaries.
-6. If loading fails, follow the troubleshooting steps.
-
-## Unit test policy (MVP)
-
+Unit test policy (MVP):
 - Test pure logic first: JSON parsing and JSON-RPC routing.
 - Keep WinDbg and socket operations in thin adapters.
 - Every key behavior in the spec maps to at least one test.
