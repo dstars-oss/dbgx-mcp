@@ -42,12 +42,12 @@ cmake --build build
 
 预期结果：
 - 构建成功。
-- 生成 `build/Debug/windbg_mcp_extension.dll`。
+- 生成 `build/Debug/dbgx-mcp.dll`。
 
 ### 2. 在 WinDbg 中加载扩展
 
 ```text
-.load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/windbg_mcp_extension.dll"
+.load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/dbgx-mcp.dll"
 ```
 
 预期结果：
@@ -69,6 +69,8 @@ cmake --build build
 
 预期结果：
 - 扩展链输出中出现 `windbg_mcp_extension`。
+
+若仍有脚本使用 `windbg_mcp_extension.dll`，请改为 `dbgx-mcp.dll` 并重新构建后再加载。
 
 ### 4. 发送首个 MCP 请求（`initialize`）
 
@@ -123,8 +125,8 @@ ctest --test-dir build -C Debug --output-on-failure -R verify_windbg_exports
 4. 若仍加载失败，检查依赖模块：
 
 ```powershell
-dumpbin /dependents build\Debug\windbg_mcp_extension.dll
-```
+dumpbin /dependents build\Debug\dbgx-mcp.dll
+``` 
 
 常见错误：
 - `Win32 error 0n2`：路径错误，或路径分隔符被错误解析。

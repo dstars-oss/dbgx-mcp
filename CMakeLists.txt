@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(WINDBG_EXTENSION_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/windbg_mcp_extension.def")
 set(WINDBG_EXPORT_CHECK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_windbg_exports.cmake")
+set(WINDBG_EXTENSION_OUTPUT_NAME "dbgx-mcp")
 set(WINDBG_REQUIRED_EXPORTS
   DebugExtensionInitialize
   DebugExtensionCanUnload
@@ -29,6 +30,12 @@ add_library(windbg_mcp_extension SHARED
   src/windbg/dbgeng_command_executor.cpp
   src/windbg_mcp_extension.cpp
   src/windbg_mcp_extension.def
+)
+
+set_target_properties(windbg_mcp_extension PROPERTIES
+  OUTPUT_NAME ${WINDBG_EXTENSION_OUTPUT_NAME}
+  OUTPUT_NAME_DEBUG ${WINDBG_EXTENSION_OUTPUT_NAME}
+  OUTPUT_NAME_RELEASE ${WINDBG_EXTENSION_OUTPUT_NAME}
 )
 
 target_include_directories(windbg_mcp_extension PRIVATE include)

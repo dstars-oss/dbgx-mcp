@@ -42,12 +42,12 @@ cmake --build build
 
 Expected result:
 - Build succeeds.
-- `build/Debug/windbg_mcp_extension.dll` is generated.
+- `build/Debug/dbgx-mcp.dll` is generated.
 
 ### 2. Load the extension in WinDbg
 
 ```text
-.load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/windbg_mcp_extension.dll"
+.load "D:/Repos/Project/AI-Native/dbgx-mcp/build/Debug/dbgx-mcp.dll"
 ```
 
 Expected result:
@@ -69,6 +69,8 @@ Important:
 
 Expected result:
 - `windbg_mcp_extension` appears in the extension chain output.
+
+If you still have automation scripts using `windbg_mcp_extension.dll`, replace them with `dbgx-mcp.dll` and rebuild to apply the rename.
 
 ### 4. Send the first MCP request (`initialize`)
 
@@ -123,8 +125,8 @@ ctest --test-dir build -C Debug --output-on-failure -R verify_windbg_exports
 4. If loading still fails, inspect dependent modules:
 
 ```powershell
-dumpbin /dependents build\Debug\windbg_mcp_extension.dll
-```
+dumpbin /dependents build\Debug\dbgx-mcp.dll
+``` 
 
 Common errors:
 - `Win32 error 0n2`: wrong path or path separators were parsed incorrectly.
