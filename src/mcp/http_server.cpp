@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -19,6 +20,22 @@ namespace {
 
 constexpr std::size_t kMaxHeaderBytes = 64 * 1024;
 constexpr std::size_t kMaxBodyBytes = 2 * 1024 * 1024;
+constexpr std::uint16_t kDefaultMaxPortAttempts = 16;
+
+std::uint16_t ResolveMaxPortAttempts(const HttpServerStartOptions* start_options) {
+  if (start_options == nullptr || start_options->max_port_attempts == 0) {
+    return kDefaultMaxPortAttempts;
+  }
+  return start_options->max_port_attempts;
+}
+
+bool IsPortConflictError(int error_code) {
+  return error_code == WSAEADDRINUSE;
+}
+
+std::string FormatSocketError(int error_code) {
+  return "WSA error " + std::to_string(error_code);
+}
 
 std::string ToLower(std::string_view value) {
   std::string lowered(value);
@@ -309,69 +326,144 @@ bool HttpServer::Start(
     const std::string& host,
     std::uint16_t port,
     HttpRequestHandler handler,
-    std::string* error_message) {
+    std::string* error_message,
+    HttpServerStartReport* start_report,
+    const HttpServerStartOptions* start_options) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
 
-  if (impl_->running.load()) {
+  std::uint16_t attempt_count = 0;
+  std::uint16_t conflict_count = 0;
+  std::uint16_t last_attempted_port = 0;
+  std::uint16_t bound_port = 0;
+  bool exhausted_conflicts = false;
+  bool fallback_used = false;
+  int last_error_code = 0;
+
+  auto set_error = [&](std::string message) {
     if (error_message != nullptr) {
-      *error_message = "Server is already running";
+      *error_message = std::move(message);
     }
+  };
+
+  auto update_start_report = [&]() {
+    if (start_report == nullptr) {
+      return;
+    }
+
+    start_report->initial_port = port;
+    start_report->last_attempted_port = last_attempted_port;
+    start_report->bound_port = bound_port;
+    start_report->attempt_count = attempt_count;
+    start_report->conflict_count = conflict_count;
+    start_report->fallback_used = fallback_used;
+    start_report->exhausted_conflicts = exhausted_conflicts;
+    start_report->last_error_code = last_error_code;
+  };
+
+  auto fail_start = [&](std::string message, int socket_error_code) -> bool {
+    last_error_code = socket_error_code;
+    update_start_report();
+    set_error(std::move(message));
+
+    if (impl_->listen_socket != INVALID_SOCKET) {
+      closesocket(impl_->listen_socket);
+      impl_->listen_socket = INVALID_SOCKET;
+    }
+    impl_->bound_port = 0;
+
+    if (impl_->wsa_initialized) {
+      WSACleanup();
+      impl_->wsa_initialized = false;
+    }
+    return false;
+  };
+
+  impl_->listen_socket = INVALID_SOCKET;
+  impl_->bound_port = 0;
+
+  if (impl_->running.load()) {
+    set_error("Server is already running");
+    update_start_report();
     return false;
   }
 
   WSADATA wsa_data{};
   if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-    if (error_message != nullptr) {
-      *error_message = "WSAStartup failed";
-    }
+    set_error("WSAStartup failed");
+    update_start_report();
     return false;
   }
   impl_->wsa_initialized = true;
 
-  impl_->listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  in_addr host_address{};
+  if (inet_pton(AF_INET, host.c_str(), &host_address) != 1) {
+    return fail_start("Invalid bind host", 0);
+  }
+
+  const std::uint16_t max_port_attempts = ResolveMaxPortAttempts(start_options);
+  for (std::uint16_t offset = 0; offset < max_port_attempts; ++offset) {
+    const std::uint32_t candidate_port_raw = static_cast<std::uint32_t>(port) + offset;
+    if (candidate_port_raw > (std::numeric_limits<std::uint16_t>::max)()) {
+      exhausted_conflicts = true;
+      break;
+    }
+
+    last_attempted_port = static_cast<std::uint16_t>(candidate_port_raw);
+    ++attempt_count;
+
+    SOCKET listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listen_socket == INVALID_SOCKET) {
+      const int socket_error = WSAGetLastError();
+      return fail_start(
+          "Failed to create listening socket (" + FormatSocketError(socket_error) + ")",
+          socket_error);
+    }
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(last_attempted_port);
+    address.sin_addr = host_address;
+
+    if (bind(listen_socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+      const int bind_error = WSAGetLastError();
+      closesocket(listen_socket);
+
+      if (IsPortConflictError(bind_error)) {
+        ++conflict_count;
+        last_error_code = bind_error;
+        continue;
+      }
+
+      return fail_start(
+          "Bind failed on port " + std::to_string(last_attempted_port) +
+              " (" + FormatSocketError(bind_error) + ")",
+          bind_error);
+    }
+
+    if (listen(listen_socket, SOMAXCONN) != 0) {
+      const int listen_error = WSAGetLastError();
+      closesocket(listen_socket);
+      return fail_start(
+          "Listen failed on port " + std::to_string(last_attempted_port) +
+              " (" + FormatSocketError(listen_error) + ")",
+          listen_error);
+    }
+
+    impl_->listen_socket = listen_socket;
+    break;
+  }
+
   if (impl_->listen_socket == INVALID_SOCKET) {
-    if (error_message != nullptr) {
-      *error_message = "Failed to create listening socket";
+    exhausted_conflicts = conflict_count > 0 && conflict_count == attempt_count;
+    std::ostringstream error_stream;
+    error_stream << "Failed to bind HTTP server starting at port " << port << " after "
+                 << attempt_count << " attempt(s)";
+    if (exhausted_conflicts) {
+      error_stream << " (all attempts hit address-in-use)";
+    } else if (last_error_code != 0) {
+      error_stream << " (" << FormatSocketError(last_error_code) << ")";
     }
-    WSACleanup();
-    impl_->wsa_initialized = false;
-    return false;
-  }
-
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(port);
-  if (inet_pton(AF_INET, host.c_str(), &address.sin_addr) != 1) {
-    if (error_message != nullptr) {
-      *error_message = "Invalid bind host";
-    }
-    closesocket(impl_->listen_socket);
-    impl_->listen_socket = INVALID_SOCKET;
-    WSACleanup();
-    impl_->wsa_initialized = false;
-    return false;
-  }
-
-  if (bind(impl_->listen_socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
-    if (error_message != nullptr) {
-      *error_message = "Bind failed";
-    }
-    closesocket(impl_->listen_socket);
-    impl_->listen_socket = INVALID_SOCKET;
-    WSACleanup();
-    impl_->wsa_initialized = false;
-    return false;
-  }
-
-  if (listen(impl_->listen_socket, SOMAXCONN) != 0) {
-    if (error_message != nullptr) {
-      *error_message = "Listen failed";
-    }
-    closesocket(impl_->listen_socket);
-    impl_->listen_socket = INVALID_SOCKET;
-    WSACleanup();
-    impl_->wsa_initialized = false;
-    return false;
+    return fail_start(error_stream.str(), last_error_code);
   }
 
   sockaddr_in bound_address{};
@@ -382,8 +474,12 @@ bool HttpServer::Start(
           &bound_address_length) == 0) {
     impl_->bound_port = ntohs(bound_address.sin_port);
   } else {
-    impl_->bound_port = port;
+    impl_->bound_port = last_attempted_port;
   }
+
+  bound_port = impl_->bound_port;
+  fallback_used = (port != 0 && bound_port != port);
+  update_start_report();
 
   impl_->handler = std::move(handler);
   impl_->stop_requested.store(false);

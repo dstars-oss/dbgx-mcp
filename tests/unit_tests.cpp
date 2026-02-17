@@ -1,5 +1,6 @@
 #include "dbgx/mcp/json_rpc.hpp"
 #include "dbgx/mcp/io_echo.hpp"
+#include "dbgx/mcp/http_server.hpp"
 
 #include <iostream>
 #include <string>
@@ -42,6 +43,125 @@ void Expect(bool condition, const std::string& message, int* failures) {
     std::cerr << "[FAIL] " << message << '\n';
     ++(*failures);
   }
+}
+
+dbgx::mcp::HttpResponse MakeNoopHttpResponse(const dbgx::mcp::HttpRequest&) {
+  dbgx::mcp::HttpResponse response;
+  response.status_code = 200;
+  response.content_type = "application/json; charset=utf-8";
+  response.body = "{}";
+  return response;
+}
+
+void TestHttpServerStartBindsWithoutConflict(int* failures) {
+  dbgx::mcp::HttpServer server;
+  dbgx::mcp::HttpServerStartReport start_report;
+  std::string error_message;
+
+  const bool started =
+      server.Start("127.0.0.1", 0, MakeNoopHttpResponse, &error_message, &start_report);
+  Expect(started, "server should start on an available port", failures);
+  if (!started) {
+    return;
+  }
+
+  Expect(start_report.attempt_count == 1, "initial available bind should use exactly one attempt", failures);
+  Expect(start_report.conflict_count == 0, "initial available bind should have no conflicts", failures);
+  Expect(start_report.bound_port == server.BoundPort(), "start report should expose actual bound port", failures);
+  Expect(server.BoundPort() != 0, "server should report a non-zero bound port", failures);
+  server.Stop();
+}
+
+void TestHttpServerFallbackAfterPortConflict(int* failures) {
+  dbgx::mcp::HttpServer blocker;
+  std::string blocker_error_message;
+  const bool blocker_started = blocker.Start("127.0.0.1", 0, MakeNoopHttpResponse, &blocker_error_message);
+  Expect(blocker_started, "blocker server should start for port-conflict test", failures);
+  if (!blocker_started) {
+    return;
+  }
+
+  const std::uint16_t blocked_port = blocker.BoundPort();
+  dbgx::mcp::HttpServer candidate;
+  dbgx::mcp::HttpServerStartOptions start_options;
+  start_options.max_port_attempts = 16;
+  dbgx::mcp::HttpServerStartReport start_report;
+  std::string error_message;
+
+  const bool started = candidate.Start(
+      "127.0.0.1",
+      blocked_port,
+      MakeNoopHttpResponse,
+      &error_message,
+      &start_report,
+      &start_options);
+  Expect(started, "server should auto-fallback when initial port is occupied", failures);
+  if (started) {
+    Expect(start_report.conflict_count >= 1, "fallback start should report at least one address-in-use conflict", failures);
+    Expect(start_report.attempt_count >= 2, "fallback start should require at least two attempts", failures);
+    Expect(start_report.fallback_used, "fallback start should be flagged as fallback_used", failures);
+    Expect(candidate.BoundPort() != blocked_port, "fallback start should bind a different port", failures);
+    candidate.Stop();
+  }
+
+  blocker.Stop();
+}
+
+void TestHttpServerFailsAfterMaxConflictAttempts(int* failures) {
+  dbgx::mcp::HttpServer blocker;
+  std::string blocker_error_message;
+  const bool blocker_started = blocker.Start("127.0.0.1", 0, MakeNoopHttpResponse, &blocker_error_message);
+  Expect(blocker_started, "blocker server should start for max-attempts failure test", failures);
+  if (!blocker_started) {
+    return;
+  }
+
+  dbgx::mcp::HttpServer candidate;
+  dbgx::mcp::HttpServerStartOptions start_options;
+  start_options.max_port_attempts = 1;
+  dbgx::mcp::HttpServerStartReport start_report;
+  std::string error_message;
+
+  const bool started = candidate.Start(
+      "127.0.0.1",
+      blocker.BoundPort(),
+      MakeNoopHttpResponse,
+      &error_message,
+      &start_report,
+      &start_options);
+
+  Expect(!started, "server should fail when max port attempts are exhausted", failures);
+  Expect(start_report.attempt_count == 1, "single-attempt option should only attempt one bind", failures);
+  Expect(start_report.conflict_count == 1, "single-attempt conflict should report one conflict", failures);
+  Expect(start_report.exhausted_conflicts, "conflict-limited failure should report exhausted_conflicts", failures);
+  Expect(
+      Contains(error_message, "all attempts hit address-in-use"),
+      "failure message should explain conflict exhaustion",
+      failures);
+
+  blocker.Stop();
+}
+
+void TestHttpServerNonRetryableBindFailureStopsImmediately(int* failures) {
+  dbgx::mcp::HttpServer server;
+  dbgx::mcp::HttpServerStartOptions start_options;
+  start_options.max_port_attempts = 8;
+  dbgx::mcp::HttpServerStartReport start_report;
+  std::string error_message;
+
+  const bool started = server.Start(
+      "203.0.113.1",
+      5678,
+      MakeNoopHttpResponse,
+      &error_message,
+      &start_report,
+      &start_options);
+
+  Expect(!started, "non-retryable bind failures should fail start", failures);
+  Expect(start_report.attempt_count == 1, "non-retryable bind failures should stop after first attempt", failures);
+  Expect(start_report.conflict_count == 0, "non-retryable bind failures should not be counted as conflicts", failures);
+  Expect(!start_report.exhausted_conflicts, "non-retryable bind failures should not mark exhausted_conflicts", failures);
+  Expect(Contains(error_message, "Bind failed on port"), "failure should identify bind error context", failures);
 }
 
 void TestInitialize(int* failures) {
@@ -295,6 +415,10 @@ int main() {
   TestUnknownMethod(&failures);
   TestInitializedNotification(&failures);
   TestParseError(&failures);
+  TestHttpServerStartBindsWithoutConflict(&failures);
+  TestHttpServerFallbackAfterPortConflict(&failures);
+  TestHttpServerFailsAfterMaxConflictAttempts(&failures);
+  TestHttpServerNonRetryableBindFailureStopsImmediately(&failures);
   TestIoEchoRequestSummaryMasksSensitiveHeader(&failures);
   TestIoEchoSummaryTruncatesLongPayload(&failures);
   TestIoEchoRequestSummaryIncludesTraceContext(&failures);

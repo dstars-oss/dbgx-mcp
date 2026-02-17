@@ -63,6 +63,7 @@ add_custom_target(check_windbg_exports
 enable_testing()
 
 add_executable(unit_tests
+  src/mcp/http_server.cpp
   src/mcp/io_echo.cpp
   src/mcp/json.cpp
   src/mcp/json_rpc.cpp
@@ -70,6 +71,7 @@ add_executable(unit_tests
 )
 
 target_include_directories(unit_tests PRIVATE include)
+target_link_libraries(unit_tests PRIVATE ws2_32)
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

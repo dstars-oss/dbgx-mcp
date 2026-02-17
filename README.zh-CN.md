@@ -52,11 +52,14 @@ cmake --build build
 
 预期结果：
 - `.load` 成功，不出现 `Win32 error`。
-- 扩展启动本地端点 `http://127.0.0.1:5678/mcp`。
+- 扩展优先尝试 `http://127.0.0.1:5678/mcp`。
+- 若 `5678` 已被占用，会自动按顺序尝试后续端口直到成功。
+- WinDbg 输出会明确给出最终监听端点。
 
 重要说明：
 - `.load` 路径请使用正斜杠 `/`。
 - 在调试器命令上下文中，反斜杠可能被当作转义字符，导致 `Win32 error 0n2`。
+- 下文所有 MCP 示例若与默认端口不一致，请以 WinDbg 日志中的最终端口为准。
 
 ### 3. 验证扩展已加载
 
@@ -127,6 +130,10 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 - `Win32 error 0n2`：路径错误，或路径分隔符被错误解析。
 - `Win32 error 0n126`：当前环境缺少依赖模块。
 
+端口冲突行为：
+- 若启动日志出现 `HTTP MCP bind fallback engaged`，表示服务已从默认端口回退到其他可用端口。
+- 发送请求时请以 `HTTP MCP server listening on http://127.0.0.1:<port>/mcp` 这行日志为准。
+
 ## WinDbg 调试日志说明
 
 扩展会在 WinDbg 输出中为每个 `/mcp` 请求打印带生命周期语义的调试日志，便于快速关联与排障。
@@ -181,6 +188,11 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 - 在合适调试会话中发送长时间命令（例如 `g`）。
 - 验证完成前可先看到 `tool_execute_start`。
 - 若同一 `trace_id` 无 `tool_execute_end`/`response_sent`，可据此判定执行阶段阻塞。
+
+4. 端口回退路径：
+- 在加载扩展前先占用 `127.0.0.1:5678`。
+- 加载扩展后确认日志出现端口回退信息，且最终端口不为 `5678`。
+- 对最终端口发送 `initialize`，验证 `/mcp` 可访问。
 
 ## MCP 请求参考
 

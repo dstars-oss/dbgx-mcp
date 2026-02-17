@@ -52,11 +52,14 @@ Expected result:
 
 Expected result:
 - `.load` succeeds without `Win32 error`.
-- The extension starts a local endpoint at `http://127.0.0.1:5678/mcp`.
+- The extension first tries `http://127.0.0.1:5678/mcp`.
+- If port `5678` is occupied, it automatically retries subsequent ports until one is available.
+- WinDbg output always includes the final listening endpoint.
 
 Important:
 - Use forward slashes in `.load` paths.
 - In debugger command contexts, backslashes may be treated as escapes, which can cause `Win32 error 0n2`.
+- For all MCP calls below, use the final port shown in WinDbg logs if fallback occurred.
 
 ### 3. Verify extension presence
 
@@ -127,6 +130,10 @@ Common errors:
 - `Win32 error 0n2`: wrong path or path separators were parsed incorrectly.
 - `Win32 error 0n126`: dependent module not found in the current environment.
 
+Port conflict behavior:
+- If startup logs include `HTTP MCP bind fallback engaged`, the server moved from the default port to another available port.
+- Use the `HTTP MCP server listening on http://127.0.0.1:<port>/mcp` line as the source of truth for requests.
+
 ## WinDbg Debug Log Guide
 
 The extension emits lifecycle-aware debug logs in WinDbg output for each `/mcp` request.
@@ -181,6 +188,11 @@ Safety behavior remains unchanged:
 - Send a long-running command (for example `g`) in a suitable debug session.
 - Verify `tool_execute_start` appears before completion.
 - If no `tool_execute_end`/`response_sent` appears for the same `trace_id`, diagnose as execution-stage stall.
+
+4. Port fallback path:
+- Occupy `127.0.0.1:5678` before loading the extension.
+- Load the extension and verify logs show bind fallback and a non-5678 final port.
+- Send `initialize` to the final port and verify `/mcp` is reachable.
 
 ## MCP Request Reference
 
