@@ -103,6 +103,18 @@ void TestUnknownMethod(int* failures) {
   Expect(Contains(result.body, "\"code\":-32601"), "unknown method should return method not found", failures);
 }
 
+void TestInitializedNotification(int* failures) {
+  FakeExecutor executor;
+  dbgx::mcp::JsonRpcRouter router(&executor);
+
+  const dbgx::mcp::JsonRpcHttpResult result =
+      router.HandleJsonRpcPost(R"({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})");
+
+  Expect(result.status_code == 202, "initialized notification should return HTTP 202", failures);
+  Expect(!result.has_body, "initialized notification should return empty body", failures);
+  Expect(result.body.empty(), "initialized notification payload should be empty", failures);
+}
+
 void TestParseError(int* failures) {
   FakeExecutor executor;
   dbgx::mcp::JsonRpcRouter router(&executor);
@@ -173,6 +185,7 @@ int main() {
   TestToolsCallSuccess(&failures);
   TestToolsCallMissingCommand(&failures);
   TestUnknownMethod(&failures);
+  TestInitializedNotification(&failures);
   TestParseError(&failures);
   TestIoEchoRequestSummaryMasksSensitiveHeader(&failures);
   TestIoEchoSummaryTruncatesLongPayload(&failures);

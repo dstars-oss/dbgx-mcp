@@ -55,6 +55,13 @@ MethodOutcome HandleInitialize() {
   return outcome;
 }
 
+MethodOutcome HandleInitializedNotification() {
+  MethodOutcome outcome;
+  outcome.ok = true;
+  outcome.result_json = "{}";
+  return outcome;
+}
+
 MethodOutcome HandleToolsList() {
   MethodOutcome outcome;
   outcome.ok = true;
@@ -141,6 +148,9 @@ MethodOutcome DispatchMethod(
     std::string_view method,
     const json::FieldMap& root_fields,
     windbg::IWinDbgCommandExecutor* executor) {
+  if (method == "notifications/initialized" || method == "initialized") {
+    return HandleInitializedNotification();
+  }
   if (method == "initialize") {
     return HandleInitialize();
   }

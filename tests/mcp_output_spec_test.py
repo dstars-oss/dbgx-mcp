@@ -337,6 +337,23 @@ def case_notification_no_id(
     expect(body == "", "notification response body must be empty")
 
 
+def case_initialized_notification(
+    base_url: str, timeout: float, protocol_version: str, _: str
+) -> None:
+    request = {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized",
+        "params": {},
+    }
+    status, body = post_json(base_url, request, timeout, protocol_version)
+
+    expect(
+        status == 202,
+        f"initialized notification should return HTTP 202, got {status}",
+    )
+    expect(body == "", "initialized notification response body must be empty")
+
+
 def run_case(
     name: str,
     case: Callable[[str, float, str, str], None],
@@ -394,6 +411,7 @@ def main() -> int:
         ("unknown method error shape", case_unknown_method),
         ("invalid JSON parse error shape", case_parse_error),
         ("notification without id behavior", case_notification_no_id),
+        ("initialized notification behavior", case_initialized_notification),
     ]
 
     passed = 0
