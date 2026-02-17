@@ -127,6 +127,61 @@ Common errors:
 - `Win32 error 0n2`: wrong path or path separators were parsed incorrectly.
 - `Win32 error 0n126`: dependent module not found in the current environment.
 
+## WinDbg Debug Log Guide
+
+The extension emits lifecycle-aware debug logs in WinDbg output for each `/mcp` request.
+
+### Key fields
+
+- `trace_id`: Request correlation key. Uses `rpc:<id>` when JSON-RPC `id` exists, otherwise `local-<seq>`.
+- `stage`: Lifecycle phase (`request_received`, `route_dispatch`, `tool_execute_start`, `tool_execute_end`, `response_sent`).
+- `duration_ms`: Elapsed milliseconds since request start.
+- `rpc_method` / `rpc_id` / `tool`: Core RPC context fields for troubleshooting.
+- `rpc_outcome`: Parsed result status (`success`, `error`, `unknown`).
+
+### Example: successful `tools/call`
+
+```text
+[windbg-mcp] mcp.request method=POST trace_id=rpc:2 stage=request_received duration_ms=0 path=/mcp rpc_method=tools/call rpc_id=2 tool=windbg.eval body_bytes=...
+[windbg-mcp] mcp.stage trace_id=rpc:2 stage=route_dispatch duration_ms=0 rpc_method=tools/call rpc_id=2 tool=windbg.eval outcome=in_progress msg=dispatching JSON-RPC request
+[windbg-mcp] mcp.stage trace_id=rpc:2 stage=tool_execute_start duration_ms=0 rpc_method=tools/call rpc_id=2 tool=windbg.eval outcome=in_progress msg=entering tool executor
+[windbg-mcp] mcp.response status=200 trace_id=rpc:2 stage=tool_execute_end duration_ms=4 has_body=true rpc_id=2 rpc_outcome=success tool=windbg.eval result=...
+[windbg-mcp] mcp.response status=200 trace_id=rpc:2 stage=response_sent duration_ms=4 has_body=true rpc_id=2 rpc_outcome=success tool=windbg.eval result=...
+```
+
+### Example: invalid params failure
+
+```text
+[windbg-mcp] mcp.request method=POST trace_id=rpc:3 stage=request_received duration_ms=0 path=/mcp rpc_method=tools/call rpc_id=3 tool=windbg.eval body_bytes=...
+[windbg-mcp] mcp.response status=200 trace_id=rpc:3 stage=tool_execute_end duration_ms=1 has_body=true rpc_id=3 rpc_outcome=error tool=windbg.eval error={"code":-32602,...}
+[windbg-mcp] mcp.response status=200 trace_id=rpc:3 stage=response_sent duration_ms=1 has_body=true rpc_id=3 rpc_outcome=error tool=windbg.eval error={"code":-32602,...}
+```
+
+### Blocking diagnosis signal
+
+If you see `stage=tool_execute_start` for a `trace_id` but never see `stage=tool_execute_end` or `stage=response_sent` with the same `trace_id`, the request is stalled inside command execution (not in HTTP routing).
+
+Safety behavior remains unchanged:
+- Sensitive headers are masked (`authorization=<masked>`).
+- Long values are truncated with `...(truncated)`.
+
+## Manual Validation Checklist (Log Readability)
+
+1. Success path:
+- Send a normal `tools/call` (for example `r eax`).
+- Verify stage order: `request_received` -> `tool_execute_start` -> `tool_execute_end` -> `response_sent`.
+- Verify `rpc_outcome=success` and consistent `trace_id`.
+
+2. Failure path:
+- Send `tools/call` without `arguments.command`.
+- Verify response remains JSON-RPC error (`-32602`).
+- Verify logs include `rpc_outcome=error` with matching `trace_id`.
+
+3. Blocking observability path:
+- Send a long-running command (for example `g`) in a suitable debug session.
+- Verify `tool_execute_start` appears before completion.
+- If no `tool_execute_end`/`response_sent` appears for the same `trace_id`, diagnose as execution-stage stall.
+
 ## MCP Request Reference
 
 ### `initialize`
@@ -199,7 +254,12 @@ Unit test policy (MVP):
 | Missing command argument | `TestToolsCallMissingCommand` |
 | Unknown method is rejected | `TestUnknownMethod` |
 | MCP request summary includes RPC metadata and masks sensitive headers | `TestIoEchoRequestSummaryMasksSensitiveHeader` |
+| Request summary includes trace/stage/tool fields | `TestIoEchoRequestSummaryIncludesTraceContext` |
+| Missing JSON-RPC id is detected from request metadata | `TestIoEchoParseRequestMetaMissingId` |
+| Local trace id stays consistent across lifecycle logs | `TestIoEchoLocalTraceIdConsistencyAcrossStages` |
 | MCP response summary covers both success and error outcomes | `TestIoEchoResponseSummaryCoversSuccessAndError` |
+| Tool result with `isError=true` is reported as error outcome | `TestIoEchoResponseSummaryTreatsToolIsErrorAsError` |
+| Blocking diagnosis uses execution-before-response stage ordering | `TestIoEchoBlockingLocatabilityStageOrder` |
 | Long MCP summaries are truncated with marker | `TestIoEchoSummaryTruncatesLongPayload` |
 | Export symbol check passes | `verify_windbg_exports` |
 | Missing export is blocked | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |

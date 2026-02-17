@@ -6,20 +6,33 @@
 #include <DbgEng.h>
 #include <windows.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
 
 constexpr std::uint16_t kDefaultPort = 5678;
 
+struct RequestTraceState {
+  std::string trace_id;
+  std::string rpc_method;
+  std::string rpc_id;
+  std::string tool_name;
+  std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
+};
+
 struct ExtensionState {
   std::mutex mutex;
   std::unique_ptr<dbgx::windbg::DbgEngCommandExecutor> executor;
   std::unique_ptr<dbgx::mcp::JsonRpcRouter> router;
   std::unique_ptr<dbgx::mcp::HttpServer> server;
+  std::atomic<std::uint64_t> next_local_trace_id{1};
 };
 
 ExtensionState& State() {
@@ -50,29 +63,100 @@ void LogMessage(const std::string& message) {
   OutputDebugStringA(fallback_line.c_str());
 }
 
-void LogRequestEcho(const dbgx::mcp::HttpRequest& request) noexcept {
+std::uint64_t ElapsedMillis(const RequestTraceState& trace_state) {
+  const auto now = std::chrono::steady_clock::now();
+  if (now <= trace_state.started_at) {
+    return 0;
+  }
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(now - trace_state.started_at).count());
+}
+
+dbgx::mcp::IoTraceContext BuildTraceContext(
+    const RequestTraceState& trace_state,
+    std::string_view stage,
+    std::string_view outcome = std::string_view()) {
+  dbgx::mcp::IoTraceContext context;
+  context.trace_id = trace_state.trace_id;
+  context.stage = std::string(stage);
+  context.rpc_method = trace_state.rpc_method;
+  context.rpc_id = trace_state.rpc_id;
+  context.tool_name = trace_state.tool_name;
+  context.outcome = std::string(outcome);
+  context.duration_ms = ElapsedMillis(trace_state);
+  return context;
+}
+
+std::string BuildTraceIdFromRpcId(std::string_view rpc_id_raw) {
+  return "rpc:" + std::string(rpc_id_raw);
+}
+
+RequestTraceState BuildRequestTraceState(const dbgx::mcp::HttpRequest& request) {
+  RequestTraceState trace_state;
+  trace_state.started_at = std::chrono::steady_clock::now();
+
+  const dbgx::mcp::RequestIoMeta request_meta = dbgx::mcp::ParseRequestIoMeta(request);
+  if (request_meta.has_rpc_method) {
+    trace_state.rpc_method = request_meta.rpc_method;
+  }
+  if (request_meta.has_rpc_id) {
+    trace_state.rpc_id = request_meta.rpc_id_raw;
+    trace_state.trace_id = BuildTraceIdFromRpcId(request_meta.rpc_id_raw);
+  }
+  if (request_meta.has_tool_name) {
+    trace_state.tool_name = request_meta.tool_name;
+  }
+
+  if (trace_state.trace_id.empty()) {
+    const std::uint64_t sequence = State().next_local_trace_id.fetch_add(1);
+    trace_state.trace_id = "local-" + std::to_string(sequence);
+  }
+
+  return trace_state;
+}
+
+void LogStageEcho(
+    const RequestTraceState& trace_state,
+    std::string_view stage,
+    std::string_view outcome,
+    std::string_view message) noexcept {
   try {
-    LogMessage(dbgx::mcp::BuildRequestIoSummary(request));
+    const dbgx::mcp::IoTraceContext trace_context = BuildTraceContext(trace_state, stage, outcome);
+    LogMessage(dbgx::mcp::BuildLifecycleIoSummary(trace_context, message));
+  } catch (...) {
+    LogMessage("mcp.stage echo unavailable");
+  }
+}
+
+void LogRequestEcho(const dbgx::mcp::HttpRequest& request, const RequestTraceState& trace_state) noexcept {
+  try {
+    const dbgx::mcp::IoTraceContext trace_context = BuildTraceContext(trace_state, "request_received");
+    LogMessage(dbgx::mcp::BuildRequestIoSummary(request, trace_context));
   } catch (...) {
     LogMessage("mcp.request echo unavailable");
   }
 }
 
-void LogResponseEcho(const dbgx::mcp::HttpResponse& response) noexcept {
+void LogResponseEcho(
+    const dbgx::mcp::HttpResponse& response,
+    const RequestTraceState& trace_state,
+    std::string_view stage) noexcept {
   try {
-    LogMessage(dbgx::mcp::BuildResponseIoSummary(response));
+    const dbgx::mcp::IoTraceContext trace_context = BuildTraceContext(trace_state, stage);
+    LogMessage(dbgx::mcp::BuildResponseIoSummary(response, trace_context));
   } catch (...) {
     LogMessage("mcp.response echo unavailable");
   }
 }
 
-dbgx::mcp::HttpResponse FinishMcpRequest(dbgx::mcp::HttpResponse response) {
-  LogResponseEcho(response);
+dbgx::mcp::HttpResponse FinishMcpRequest(dbgx::mcp::HttpResponse response, const RequestTraceState& trace_state) {
+  LogResponseEcho(response, trace_state, "response_sent");
   return response;
 }
 
 dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
   dbgx::mcp::HttpResponse response;
+  const RequestTraceState trace_state = BuildRequestTraceState(request);
 
   if (request.path != "/mcp") {
     response.status_code = 404;
@@ -80,14 +164,14 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
     return response;
   }
 
-  LogRequestEcho(request);
+  LogRequestEcho(request, trace_state);
 
   const auto origin_it = request.headers.find("origin");
   if (origin_it != request.headers.end() && !dbgx::mcp::IsOriginAllowed(origin_it->second)) {
     response.status_code = 403;
     response.body =
         "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Forbidden origin\"}}";
-    return FinishMcpRequest(std::move(response));
+    return FinishMcpRequest(std::move(response), trace_state);
   }
 
   const auto protocol_header_it = request.headers.find("mcp-protocol-version");
@@ -97,20 +181,25 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
       response.status_code = 400;
       response.body =
           "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Unsupported MCP protocol version\"}}";
-      return FinishMcpRequest(std::move(response));
+      return FinishMcpRequest(std::move(response), trace_state);
     }
   }
 
   if (request.method == "GET") {
     response.status_code = 405;
     response.body = "{\"error\":\"GET stream is not implemented in this MVP\"}";
-    return FinishMcpRequest(std::move(response));
+    return FinishMcpRequest(std::move(response), trace_state);
   }
 
   if (request.method != "POST") {
     response.status_code = 405;
     response.body = "{\"error\":\"Method Not Allowed\"}";
-    return FinishMcpRequest(std::move(response));
+    return FinishMcpRequest(std::move(response), trace_state);
+  }
+
+  LogStageEcho(trace_state, "route_dispatch", "in_progress", "dispatching JSON-RPC request");
+  if (trace_state.rpc_method == "tools/call") {
+    LogStageEcho(trace_state, "tool_execute_start", "in_progress", "entering tool executor");
   }
 
   ExtensionState& state = State();
@@ -118,7 +207,7 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
   if (state.router == nullptr) {
     response.status_code = 500;
     response.body = "{\"error\":\"Router is not initialized\"}";
-    return FinishMcpRequest(std::move(response));
+    return FinishMcpRequest(std::move(response), trace_state);
   }
 
   const dbgx::mcp::JsonRpcHttpResult rpc_result = state.router->HandleJsonRpcPost(request.body);
@@ -126,7 +215,10 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
   response.content_type = rpc_result.content_type;
   response.has_body = rpc_result.has_body;
   response.body = rpc_result.body;
-  return FinishMcpRequest(std::move(response));
+  if (trace_state.rpc_method == "tools/call") {
+    LogResponseEcho(response, trace_state, "tool_execute_end");
+  }
+  return FinishMcpRequest(std::move(response), trace_state);
 }
 
 void Cleanup() {

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -156,6 +157,73 @@ void TestIoEchoSummaryTruncatesLongPayload(int* failures) {
   Expect(Contains(summary, "...(truncated)"), "long response summary should be truncated", failures);
 }
 
+void TestIoEchoRequestSummaryIncludesTraceContext(int* failures) {
+  dbgx::mcp::HttpRequest request;
+  request.method = "POST";
+  request.path = "/mcp";
+  request.body =
+      R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"windbg.eval","arguments":{"command":"g"}}})";
+
+  dbgx::mcp::IoTraceContext trace_context;
+  trace_context.trace_id = "rpc:7";
+  trace_context.stage = "tool_execute_start";
+  trace_context.rpc_method = "tools/call";
+  trace_context.rpc_id = "7";
+  trace_context.tool_name = "windbg.eval";
+  trace_context.duration_ms = 12;
+
+  const std::string summary = dbgx::mcp::BuildRequestIoSummary(request, trace_context);
+  Expect(Contains(summary, "trace_id=rpc:7"), "request summary should include trace id", failures);
+  Expect(Contains(summary, "stage=tool_execute_start"), "request summary should include stage", failures);
+  Expect(Contains(summary, "duration_ms=12"), "request summary should include duration", failures);
+  Expect(Contains(summary, "tool=windbg.eval"), "request summary should include tool name", failures);
+}
+
+void TestIoEchoParseRequestMetaMissingId(int* failures) {
+  dbgx::mcp::HttpRequest request;
+  request.method = "POST";
+  request.path = "/mcp";
+  request.body =
+      R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"windbg.eval","arguments":{"command":"g"}}})";
+
+  const dbgx::mcp::RequestIoMeta meta = dbgx::mcp::ParseRequestIoMeta(request);
+  Expect(meta.parseable, "request meta should parse valid JSON", failures);
+  Expect(meta.has_rpc_method && meta.rpc_method == "tools/call", "request meta should include tools/call method", failures);
+  Expect(!meta.has_rpc_id, "request meta should detect missing id", failures);
+  Expect(meta.has_tool_name && meta.tool_name == "windbg.eval", "request meta should include tool name", failures);
+}
+
+void TestIoEchoLocalTraceIdConsistencyAcrossStages(int* failures) {
+  dbgx::mcp::HttpRequest request;
+  request.method = "POST";
+  request.path = "/mcp";
+  request.body =
+      R"({"jsonrpc":"2.0","method":"tools/call","params":{"name":"windbg.eval","arguments":{"command":"g"}}})";
+
+  dbgx::mcp::IoTraceContext request_context;
+  request_context.trace_id = "local-42";
+  request_context.stage = "request_received";
+  request_context.rpc_method = "tools/call";
+  request_context.tool_name = "windbg.eval";
+  request_context.duration_ms = 0;
+
+  const std::string request_summary = dbgx::mcp::BuildRequestIoSummary(request, request_context);
+  Expect(Contains(request_summary, "trace_id=local-42"), "request summary should include local trace id", failures);
+
+  dbgx::mcp::HttpResponse response;
+  response.status_code = 200;
+  response.body =
+      R"({"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"ok"}],"isError":false}})";
+
+  dbgx::mcp::IoTraceContext response_context = request_context;
+  response_context.stage = "response_sent";
+  response_context.duration_ms = 25;
+
+  const std::string response_summary = dbgx::mcp::BuildResponseIoSummary(response, response_context);
+  Expect(Contains(response_summary, "trace_id=local-42"), "response summary should include same local trace id", failures);
+  Expect(Contains(response_summary, "stage=response_sent"), "response summary should include response stage", failures);
+}
+
 void TestIoEchoResponseSummaryCoversSuccessAndError(int* failures) {
   dbgx::mcp::HttpResponse success_response;
   success_response.status_code = 200;
@@ -175,6 +243,46 @@ void TestIoEchoResponseSummaryCoversSuccessAndError(int* failures) {
   Expect(Contains(error_summary, "-32600"), "error response summary should include JSON-RPC error code", failures);
 }
 
+void TestIoEchoResponseSummaryTreatsToolIsErrorAsError(int* failures) {
+  dbgx::mcp::HttpResponse response;
+  response.status_code = 200;
+  response.body =
+      R"({"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"failed"}],"isError":true}})";
+
+  const std::string summary = dbgx::mcp::BuildResponseIoSummary(response);
+  Expect(Contains(summary, "rpc_outcome=error"), "result.isError=true should be treated as error outcome", failures);
+}
+
+void TestIoEchoBlockingLocatabilityStageOrder(int* failures) {
+  dbgx::mcp::IoTraceContext execute_start_context;
+  execute_start_context.trace_id = "rpc:5";
+  execute_start_context.stage = "tool_execute_start";
+  execute_start_context.rpc_method = "tools/call";
+  execute_start_context.rpc_id = "5";
+  execute_start_context.tool_name = "windbg.eval";
+  execute_start_context.outcome = "in_progress";
+  execute_start_context.duration_ms = 0;
+
+  dbgx::mcp::IoTraceContext response_context = execute_start_context;
+  response_context.stage = "response_sent";
+  response_context.outcome.clear();
+  response_context.duration_ms = 40;
+
+  dbgx::mcp::HttpResponse response;
+  response.status_code = 200;
+  response.body =
+      R"({"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"ok"}],"isError":false}})";
+
+  std::vector<std::string> logs;
+  logs.push_back(dbgx::mcp::BuildLifecycleIoSummary(execute_start_context, "entering tool executor"));
+  logs.push_back(dbgx::mcp::BuildResponseIoSummary(response, response_context));
+
+  Expect(Contains(logs[0], "stage=tool_execute_start"), "first log should indicate tool execution start", failures);
+  Expect(Contains(logs[1], "stage=response_sent"), "second log should indicate response stage", failures);
+  Expect(Contains(logs[0], "trace_id=rpc:5"), "first log should include request trace id", failures);
+  Expect(Contains(logs[1], "trace_id=rpc:5"), "second log should include same request trace id", failures);
+}
+
 }  // namespace
 
 int main() {
@@ -189,7 +297,12 @@ int main() {
   TestParseError(&failures);
   TestIoEchoRequestSummaryMasksSensitiveHeader(&failures);
   TestIoEchoSummaryTruncatesLongPayload(&failures);
+  TestIoEchoRequestSummaryIncludesTraceContext(&failures);
+  TestIoEchoParseRequestMetaMissingId(&failures);
+  TestIoEchoLocalTraceIdConsistencyAcrossStages(&failures);
   TestIoEchoResponseSummaryCoversSuccessAndError(&failures);
+  TestIoEchoResponseSummaryTreatsToolIsErrorAsError(&failures);
+  TestIoEchoBlockingLocatabilityStageOrder(&failures);
 
   if (failures == 0) {
     std::cout << "All unit tests passed.\n";

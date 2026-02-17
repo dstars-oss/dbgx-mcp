@@ -127,6 +127,61 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 - `Win32 error 0n2`：路径错误，或路径分隔符被错误解析。
 - `Win32 error 0n126`：当前环境缺少依赖模块。
 
+## WinDbg 调试日志说明
+
+扩展会在 WinDbg 输出中为每个 `/mcp` 请求打印带生命周期语义的调试日志，便于快速关联与排障。
+
+### 关键字段
+
+- `trace_id`：请求关联键。有 JSON-RPC `id` 时使用 `rpc:<id>`，否则使用 `local-<seq>`。
+- `stage`：生命周期阶段（`request_received`、`route_dispatch`、`tool_execute_start`、`tool_execute_end`、`response_sent`）。
+- `duration_ms`：从请求开始到当前日志点的耗时（毫秒）。
+- `rpc_method` / `rpc_id` / `tool`：用于定位问题的核心 RPC 上下文字段。
+- `rpc_outcome`：解析后的结果状态（`success`、`error`、`unknown`）。
+
+### 示例：`tools/call` 成功
+
+```text
+[windbg-mcp] mcp.request method=POST trace_id=rpc:2 stage=request_received duration_ms=0 path=/mcp rpc_method=tools/call rpc_id=2 tool=windbg.eval body_bytes=...
+[windbg-mcp] mcp.stage trace_id=rpc:2 stage=route_dispatch duration_ms=0 rpc_method=tools/call rpc_id=2 tool=windbg.eval outcome=in_progress msg=dispatching JSON-RPC request
+[windbg-mcp] mcp.stage trace_id=rpc:2 stage=tool_execute_start duration_ms=0 rpc_method=tools/call rpc_id=2 tool=windbg.eval outcome=in_progress msg=entering tool executor
+[windbg-mcp] mcp.response status=200 trace_id=rpc:2 stage=tool_execute_end duration_ms=4 has_body=true rpc_id=2 rpc_outcome=success tool=windbg.eval result=...
+[windbg-mcp] mcp.response status=200 trace_id=rpc:2 stage=response_sent duration_ms=4 has_body=true rpc_id=2 rpc_outcome=success tool=windbg.eval result=...
+```
+
+### 示例：参数错误失败
+
+```text
+[windbg-mcp] mcp.request method=POST trace_id=rpc:3 stage=request_received duration_ms=0 path=/mcp rpc_method=tools/call rpc_id=3 tool=windbg.eval body_bytes=...
+[windbg-mcp] mcp.response status=200 trace_id=rpc:3 stage=tool_execute_end duration_ms=1 has_body=true rpc_id=3 rpc_outcome=error tool=windbg.eval error={"code":-32602,...}
+[windbg-mcp] mcp.response status=200 trace_id=rpc:3 stage=response_sent duration_ms=1 has_body=true rpc_id=3 rpc_outcome=error tool=windbg.eval error={"code":-32602,...}
+```
+
+### 阻塞定位信号
+
+如果同一 `trace_id` 只出现 `stage=tool_execute_start`，但一直没有 `stage=tool_execute_end` 或 `stage=response_sent`，则可判断请求停滞在命令执行阶段，而非 HTTP 路由阶段。
+
+安全行为保持不变：
+- 敏感请求头会被掩码（例如 `authorization=<masked>`）。
+- 超长文本会被截断并标注 `...(truncated)`。
+
+## 人工验收清单（日志可读性）
+
+1. 成功路径：
+- 发送正常 `tools/call`（例如 `r eax`）。
+- 验证阶段顺序：`request_received` -> `tool_execute_start` -> `tool_execute_end` -> `response_sent`。
+- 验证 `rpc_outcome=success` 且 `trace_id` 一致。
+
+2. 失败路径：
+- 发送不带 `arguments.command` 的 `tools/call`。
+- 验证响应仍是 JSON-RPC 参数错误（`-32602`）。
+- 验证日志包含 `rpc_outcome=error` 且 `trace_id` 对应一致。
+
+3. 阻塞可观测路径：
+- 在合适调试会话中发送长时间命令（例如 `g`）。
+- 验证完成前可先看到 `tool_execute_start`。
+- 若同一 `trace_id` 无 `tool_execute_end`/`response_sent`，可据此判定执行阶段阻塞。
+
 ## MCP 请求参考
 
 ### `initialize`
@@ -199,10 +254,15 @@ ctest --test-dir build -C Debug --output-on-failure
 | 缺少命令参数 | `TestToolsCallMissingCommand` |
 | 未知方法被拒绝 | `TestUnknownMethod` |
 | MCP 请求摘要包含 RPC 元信息且掩码敏感头 | `TestIoEchoRequestSummaryMasksSensitiveHeader` |
+| 请求摘要包含 trace/stage/tool 字段 | `TestIoEchoRequestSummaryIncludesTraceContext` |
+| 缺失 JSON-RPC id 能从请求元信息中识别 | `TestIoEchoParseRequestMetaMissingId` |
+| 本地 trace id 在生命周期日志中保持一致 | `TestIoEchoLocalTraceIdConsistencyAcrossStages` |
 | MCP 响应摘要覆盖成功与错误路径 | `TestIoEchoResponseSummaryCoversSuccessAndError` |
+| `isError=true` 的工具结果会被标记为错误 | `TestIoEchoResponseSummaryTreatsToolIsErrorAsError` |
+| 阻塞定位依赖执行阶段先于响应阶段的顺序 | `TestIoEchoBlockingLocatabilityStageOrder` |
 | 超长 MCP 摘要会被截断并带标记 | `TestIoEchoSummaryTruncatesLongPayload` |
 | 导出符号检查通过 | `verify_windbg_exports` |
 | 缺失导出被阻断 | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
 | 加载命令路径写法可复用 | `Load in WinDbg` command examples |
-| 加载失败有诊断指引 | `Troubleshooting .load failures` section |
+| 加载失败有诊断指引 | `.load` 失败排查章节 |
 | 非法 JSON 处理 | `TestParseError` |

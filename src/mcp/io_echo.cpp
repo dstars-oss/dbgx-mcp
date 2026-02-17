@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -13,6 +15,17 @@ namespace {
 
 constexpr std::size_t kSummaryValueLimit = 160;
 constexpr std::string_view kTruncatedSuffix = "...(truncated)";
+
+struct ResponseIoMeta {
+  bool parseable = false;
+  bool has_rpc_id = false;
+  std::string rpc_id_raw;
+  bool has_error = false;
+  std::string error_raw;
+  bool has_result = false;
+  std::string result_raw;
+  std::string rpc_outcome = "unknown";
+};
 
 std::string ToLowerAscii(std::string_view value) {
   std::string lowered;
@@ -26,6 +39,10 @@ std::string ToLowerAscii(std::string_view value) {
 bool IsSensitiveHeaderName(std::string_view header_name) {
   const std::string lowered = ToLowerAscii(header_name);
   return lowered == "authorization" || lowered == "proxy-authorization" || lowered == "x-api-key";
+}
+
+bool IsJsonTrueLiteral(std::string_view raw) {
+  return json::Trim(raw) == "true";
 }
 
 std::string SanitizeSingleLine(std::string_view value) {
@@ -94,57 +111,182 @@ std::string BuildSensitiveHeadersSummary(const HttpRequest& request) {
   return "sensitive_headers=" + JoinValues(masked_headers);
 }
 
-void AppendRpcRequestMeta(const json::FieldMap& fields, std::string* summary) {
-  std::string method;
-  if (json::TryGetStringField(fields, "method", &method)) {
-    *summary += " rpc_method=" + TruncateForSummary(method);
-  } else {
-    *summary += " rpc_method=(missing)";
+RequestIoMeta ParseRequestIoMetaFromBody(std::string_view request_body) {
+  RequestIoMeta meta;
+
+  json::FieldMap root_fields;
+  std::string parse_error;
+  if (!json::ParseObjectFields(request_body, &root_fields, &parse_error)) {
+    return meta;
   }
 
-  std::string id_raw;
-  if (json::TryGetRawField(fields, "id", &id_raw)) {
-    *summary += " rpc_id=" + TruncateForSummary(id_raw);
-  } else {
-    *summary += " rpc_id=(missing)";
+  meta.parseable = true;
+  if (json::TryGetStringField(root_fields, "method", &meta.rpc_method)) {
+    meta.has_rpc_method = true;
+  }
+  if (json::TryGetRawField(root_fields, "id", &meta.rpc_id_raw)) {
+    meta.has_rpc_id = true;
+  }
+
+  if (!meta.has_rpc_method || meta.rpc_method != "tools/call") {
+    return meta;
+  }
+
+  json::FieldMap params_fields;
+  if (!json::TryGetObjectField(root_fields, "params", &params_fields, &parse_error)) {
+    return meta;
+  }
+
+  if (json::TryGetStringField(params_fields, "name", &meta.tool_name)) {
+    meta.has_tool_name = true;
+  }
+  return meta;
+}
+
+ResponseIoMeta ParseResponseIoMeta(std::string_view response_body) {
+  ResponseIoMeta meta;
+
+  json::FieldMap root_fields;
+  std::string parse_error;
+  if (!json::ParseObjectFields(response_body, &root_fields, &parse_error)) {
+    return meta;
+  }
+
+  meta.parseable = true;
+  if (json::TryGetRawField(root_fields, "id", &meta.rpc_id_raw)) {
+    meta.has_rpc_id = true;
+  }
+
+  if (json::TryGetRawField(root_fields, "error", &meta.error_raw)) {
+    meta.has_error = true;
+    meta.rpc_outcome = "error";
+    return meta;
+  }
+
+  if (json::TryGetRawField(root_fields, "result", &meta.result_raw)) {
+    meta.has_result = true;
+    meta.rpc_outcome = "success";
+
+    json::FieldMap result_fields;
+    if (json::ParseObjectFields(meta.result_raw, &result_fields, &parse_error)) {
+      std::string is_error_raw;
+      if (json::TryGetRawField(result_fields, "isError", &is_error_raw) && IsJsonTrueLiteral(is_error_raw)) {
+        meta.rpc_outcome = "error";
+      }
+    }
+    return meta;
+  }
+
+  return meta;
+}
+
+void AppendTraceContext(const IoTraceContext* trace_context, std::string* summary) {
+  if (trace_context == nullptr) {
+    return;
+  }
+
+  if (!trace_context->trace_id.empty()) {
+    *summary += " trace_id=" + TruncateForSummary(trace_context->trace_id);
+  }
+  if (!trace_context->stage.empty()) {
+    *summary += " stage=" + TruncateForSummary(trace_context->stage);
+  }
+  *summary += " duration_ms=" + std::to_string(trace_context->duration_ms);
+}
+
+void AppendRpcRequestMeta(
+    const RequestIoMeta& request_meta,
+    const IoTraceContext* trace_context,
+    std::string* summary) {
+  std::string rpc_method = "(missing)";
+  if (trace_context != nullptr && !trace_context->rpc_method.empty()) {
+    rpc_method = trace_context->rpc_method;
+  } else if (request_meta.has_rpc_method) {
+    rpc_method = request_meta.rpc_method;
+  }
+  *summary += " rpc_method=" + TruncateForSummary(rpc_method);
+
+  std::string rpc_id = "(missing)";
+  if (trace_context != nullptr && !trace_context->rpc_id.empty()) {
+    rpc_id = trace_context->rpc_id;
+  } else if (request_meta.has_rpc_id) {
+    rpc_id = request_meta.rpc_id_raw;
+  }
+  *summary += " rpc_id=" + TruncateForSummary(rpc_id);
+
+  std::string tool_name;
+  if (trace_context != nullptr && !trace_context->tool_name.empty()) {
+    tool_name = trace_context->tool_name;
+  } else if (request_meta.has_tool_name) {
+    tool_name = request_meta.tool_name;
+  }
+
+  if (!tool_name.empty() || rpc_method == "tools/call") {
+    *summary += " tool=" + TruncateForSummary(tool_name.empty() ? "(missing)" : tool_name);
   }
 }
 
-void AppendRpcResponseMeta(const json::FieldMap& fields, std::string* summary) {
-  std::string id_raw;
-  if (json::TryGetRawField(fields, "id", &id_raw)) {
-    *summary += " rpc_id=" + TruncateForSummary(id_raw);
+void AppendRpcResponseMeta(
+    const ResponseIoMeta& response_meta,
+    const IoTraceContext* trace_context,
+    std::string* summary) {
+  std::string rpc_id;
+  if (trace_context != nullptr && !trace_context->rpc_id.empty()) {
+    rpc_id = trace_context->rpc_id;
+  } else if (response_meta.has_rpc_id) {
+    rpc_id = response_meta.rpc_id_raw;
+  }
+  if (!rpc_id.empty()) {
+    *summary += " rpc_id=" + TruncateForSummary(rpc_id);
   }
 
-  std::string error_raw;
-  if (json::TryGetRawField(fields, "error", &error_raw)) {
-    *summary += " rpc_outcome=error";
-    *summary += " error=" + TruncateForSummary(error_raw);
+  std::string rpc_outcome;
+  if (trace_context != nullptr && !trace_context->outcome.empty()) {
+    rpc_outcome = trace_context->outcome;
+  } else {
+    rpc_outcome = response_meta.rpc_outcome;
+  }
+  *summary += " rpc_outcome=" + TruncateForSummary(rpc_outcome.empty() ? "unknown" : rpc_outcome);
+
+  if (trace_context != nullptr && !trace_context->tool_name.empty()) {
+    *summary += " tool=" + TruncateForSummary(trace_context->tool_name);
+  }
+
+  if (response_meta.has_error) {
+    *summary += " error=" + TruncateForSummary(response_meta.error_raw);
     return;
   }
 
-  std::string result_raw;
-  if (json::TryGetRawField(fields, "result", &result_raw)) {
-    *summary += " rpc_outcome=success";
-    *summary += " result=" + TruncateForSummary(result_raw);
-    return;
+  if (response_meta.has_result) {
+    *summary += " result=" + TruncateForSummary(response_meta.result_raw);
   }
-
-  *summary += " rpc_outcome=unknown";
 }
 
 }  // namespace
 
 std::string BuildRequestIoSummary(const HttpRequest& request) {
+  return BuildRequestIoSummary(request, IoTraceContext{});
+}
+
+std::string BuildRequestIoSummary(const HttpRequest& request, const IoTraceContext& trace_context) {
   std::string summary = "mcp.request method=" + TruncateForSummary(request.method);
+  AppendTraceContext(&trace_context, &summary);
   summary += " path=" + TruncateForSummary(request.path);
 
-  json::FieldMap root_fields;
-  std::string parse_error;
-  if (json::ParseObjectFields(request.body, &root_fields, &parse_error)) {
-    AppendRpcRequestMeta(root_fields, &summary);
+  const RequestIoMeta request_meta = ParseRequestIoMetaFromBody(request.body);
+  if (request_meta.parseable) {
+    AppendRpcRequestMeta(request_meta, &trace_context, &summary);
   } else {
     summary += " rpc_meta=unparseable";
+    if (!trace_context.rpc_method.empty()) {
+      summary += " rpc_method=" + TruncateForSummary(trace_context.rpc_method);
+    }
+    if (!trace_context.rpc_id.empty()) {
+      summary += " rpc_id=" + TruncateForSummary(trace_context.rpc_id);
+    }
+    if (!trace_context.tool_name.empty()) {
+      summary += " tool=" + TruncateForSummary(trace_context.tool_name);
+    }
   }
 
   summary += " body_bytes=" + std::to_string(request.body.size());
@@ -152,22 +294,70 @@ std::string BuildRequestIoSummary(const HttpRequest& request) {
   return summary;
 }
 
+RequestIoMeta ParseRequestIoMeta(const HttpRequest& request) {
+  return ParseRequestIoMetaFromBody(request.body);
+}
+
+std::string BuildLifecycleIoSummary(const IoTraceContext& trace_context, std::string_view message) {
+  std::string summary = "mcp.stage";
+  AppendTraceContext(&trace_context, &summary);
+
+  if (!trace_context.rpc_method.empty()) {
+    summary += " rpc_method=" + TruncateForSummary(trace_context.rpc_method);
+  }
+  if (!trace_context.rpc_id.empty()) {
+    summary += " rpc_id=" + TruncateForSummary(trace_context.rpc_id);
+  }
+  if (!trace_context.tool_name.empty()) {
+    summary += " tool=" + TruncateForSummary(trace_context.tool_name);
+  }
+  if (!trace_context.outcome.empty()) {
+    summary += " outcome=" + TruncateForSummary(trace_context.outcome);
+  }
+  if (!message.empty()) {
+    summary += " msg=" + TruncateForSummary(message);
+  }
+  return summary;
+}
+
 std::string BuildResponseIoSummary(const HttpResponse& response) {
+  return BuildResponseIoSummary(response, IoTraceContext{});
+}
+
+std::string BuildResponseIoSummary(const HttpResponse& response, const IoTraceContext& trace_context) {
   std::string summary = "mcp.response status=" + std::to_string(response.status_code);
+  AppendTraceContext(&trace_context, &summary);
   summary += response.has_body ? " has_body=true" : " has_body=false";
 
   if (!response.has_body) {
+    if (!trace_context.rpc_id.empty()) {
+      summary += " rpc_id=" + TruncateForSummary(trace_context.rpc_id);
+    }
+    if (!trace_context.outcome.empty()) {
+      summary += " rpc_outcome=" + TruncateForSummary(trace_context.outcome);
+    }
+    if (!trace_context.tool_name.empty()) {
+      summary += " tool=" + TruncateForSummary(trace_context.tool_name);
+    }
     return summary;
   }
 
-  json::FieldMap root_fields;
-  std::string parse_error;
-  if (json::ParseObjectFields(response.body, &root_fields, &parse_error)) {
-    AppendRpcResponseMeta(root_fields, &summary);
+  const ResponseIoMeta response_meta = ParseResponseIoMeta(response.body);
+  if (response_meta.parseable) {
+    AppendRpcResponseMeta(response_meta, &trace_context, &summary);
     return summary;
   }
 
   summary += " rpc_meta=unparseable";
+  if (!trace_context.rpc_id.empty()) {
+    summary += " rpc_id=" + TruncateForSummary(trace_context.rpc_id);
+  }
+  if (!trace_context.outcome.empty()) {
+    summary += " rpc_outcome=" + TruncateForSummary(trace_context.outcome);
+  }
+  if (!trace_context.tool_name.empty()) {
+    summary += " tool=" + TruncateForSummary(trace_context.tool_name);
+  }
   summary += " body=" + TruncateForSummary(response.body.empty() ? "(empty)" : response.body);
   return summary;
 }
