@@ -134,7 +134,8 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 2. 执行 `verify_windbg_exports` 检查。
 3. 在 WinDbg/CDB 中按上文格式使用正斜杠绝对路径执行 `.load`。
 4. 运行 `.chain` 并确认出现 `windbg_mcp_extension`。
-5. 若加载失败，按排查步骤处理。
+5. 向 `http://127.0.0.1:5678/mcp` 发送最小 `initialize` 或 `tools/call` 请求，确认 WinDbg 输出中可见请求/响应摘要。
+6. 若加载失败，按排查步骤处理。
 
 ## 单元测试策略（MVP）
 
@@ -151,6 +152,9 @@ dumpbin /dependents build\Debug\windbg_mcp_extension.dll
 | 命令执行成功 | `TestToolsCallSuccess` |
 | 缺少命令参数 | `TestToolsCallMissingCommand` |
 | 未知方法被拒绝 | `TestUnknownMethod` |
+| MCP 请求摘要包含 RPC 元信息且掩码敏感头 | `TestIoEchoRequestSummaryMasksSensitiveHeader` |
+| MCP 响应摘要覆盖成功与错误路径 | `TestIoEchoResponseSummaryCoversSuccessAndError` |
+| 超长 MCP 摘要会被截断并带标记 | `TestIoEchoSummaryTruncatesLongPayload` |
 | 导出符号检查通过 | `verify_windbg_exports` |
 | 缺失导出被阻断 | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
 | 加载命令路径写法可复用 | `Load in WinDbg` command examples |

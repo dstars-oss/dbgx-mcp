@@ -134,7 +134,8 @@ Common errors:
 2. Run `verify_windbg_exports` checks.
 3. In WinDbg/CDB, execute `.load` with the forward-slash absolute path format shown above.
 4. Run `.chain` and confirm `windbg_mcp_extension` appears.
-5. If loading fails, follow the troubleshooting steps.
+5. Send a minimal `initialize` or `tools/call` request to `http://127.0.0.1:5678/mcp` and confirm WinDbg output shows request/response summaries.
+6. If loading fails, follow the troubleshooting steps.
 
 ## Unit test policy (MVP)
 
@@ -151,6 +152,9 @@ Common errors:
 | Command execution succeeds | `TestToolsCallSuccess` |
 | Missing command argument | `TestToolsCallMissingCommand` |
 | Unknown method is rejected | `TestUnknownMethod` |
+| MCP request summary includes RPC metadata and masks sensitive headers | `TestIoEchoRequestSummaryMasksSensitiveHeader` |
+| MCP response summary covers both success and error outcomes | `TestIoEchoResponseSummaryCoversSuccessAndError` |
+| Long MCP summaries are truncated with marker | `TestIoEchoSummaryTruncatesLongPayload` |
 | Export symbol check passes | `verify_windbg_exports` |
 | Missing export is blocked | `verify_windbg_exports_missing_symbol` (WILL_FAIL) |
 | Load command path format is reusable | `Load in WinDbg` command examples |

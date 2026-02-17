@@ -1,4 +1,5 @@
 #include "dbgx/mcp/http_server.hpp"
+#include "dbgx/mcp/io_echo.hpp"
 #include "dbgx/mcp/json_rpc.hpp"
 #include "dbgx/windbg/dbgeng_command_executor.hpp"
 
@@ -8,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -26,8 +28,47 @@ ExtensionState& State() {
 }
 
 void LogMessage(const std::string& message) {
-  std::string text = "[windbg-mcp] " + message + "\n";
-  OutputDebugStringA(text.c_str());
+  const std::string text = "[windbg-mcp] " + message;
+
+  IDebugClient* debug_client = nullptr;
+  if (SUCCEEDED(DebugCreate(__uuidof(IDebugClient), reinterpret_cast<void**>(&debug_client))) &&
+      debug_client != nullptr) {
+    IDebugControl* debug_control = nullptr;
+    if (SUCCEEDED(debug_client->QueryInterface(__uuidof(IDebugControl), reinterpret_cast<void**>(&debug_control))) &&
+        debug_control != nullptr) {
+      std::string line = text + "\n";
+      debug_control->Output(DEBUG_OUTPUT_NORMAL, "%s", line.c_str());
+      debug_control->Release();
+      debug_client->Release();
+      return;
+    }
+
+    debug_client->Release();
+  }
+
+  std::string fallback_line = text + "\n";
+  OutputDebugStringA(fallback_line.c_str());
+}
+
+void LogRequestEcho(const dbgx::mcp::HttpRequest& request) noexcept {
+  try {
+    LogMessage(dbgx::mcp::BuildRequestIoSummary(request));
+  } catch (...) {
+    LogMessage("mcp.request echo unavailable");
+  }
+}
+
+void LogResponseEcho(const dbgx::mcp::HttpResponse& response) noexcept {
+  try {
+    LogMessage(dbgx::mcp::BuildResponseIoSummary(response));
+  } catch (...) {
+    LogMessage("mcp.response echo unavailable");
+  }
+}
+
+dbgx::mcp::HttpResponse FinishMcpRequest(dbgx::mcp::HttpResponse response) {
+  LogResponseEcho(response);
+  return response;
 }
 
 dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
@@ -39,12 +80,14 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
     return response;
   }
 
+  LogRequestEcho(request);
+
   const auto origin_it = request.headers.find("origin");
   if (origin_it != request.headers.end() && !dbgx::mcp::IsOriginAllowed(origin_it->second)) {
     response.status_code = 403;
     response.body =
         "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Forbidden origin\"}}";
-    return response;
+    return FinishMcpRequest(std::move(response));
   }
 
   const auto protocol_header_it = request.headers.find("mcp-protocol-version");
@@ -54,20 +97,20 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
       response.status_code = 400;
       response.body =
           "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Unsupported MCP protocol version\"}}";
-      return response;
+      return FinishMcpRequest(std::move(response));
     }
   }
 
   if (request.method == "GET") {
     response.status_code = 405;
     response.body = "{\"error\":\"GET stream is not implemented in this MVP\"}";
-    return response;
+    return FinishMcpRequest(std::move(response));
   }
 
   if (request.method != "POST") {
     response.status_code = 405;
     response.body = "{\"error\":\"Method Not Allowed\"}";
-    return response;
+    return FinishMcpRequest(std::move(response));
   }
 
   ExtensionState& state = State();
@@ -75,7 +118,7 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
   if (state.router == nullptr) {
     response.status_code = 500;
     response.body = "{\"error\":\"Router is not initialized\"}";
-    return response;
+    return FinishMcpRequest(std::move(response));
   }
 
   const dbgx::mcp::JsonRpcHttpResult rpc_result = state.router->HandleJsonRpcPost(request.body);
@@ -83,7 +126,7 @@ dbgx::mcp::HttpResponse HandleRequest(const dbgx::mcp::HttpRequest& request) {
   response.content_type = rpc_result.content_type;
   response.has_body = rpc_result.has_body;
   response.body = rpc_result.body;
-  return response;
+  return FinishMcpRequest(std::move(response));
 }
 
 void Cleanup() {

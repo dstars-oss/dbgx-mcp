@@ -1,4 +1,5 @@
 #include "dbgx/mcp/json_rpc.hpp"
+#include "dbgx/mcp/io_echo.hpp"
 
 #include <iostream>
 #include <string>
@@ -112,6 +113,56 @@ void TestParseError(int* failures) {
   Expect(Contains(result.body, "\"code\":-32700"), "invalid JSON should return parse error", failures);
 }
 
+void TestIoEchoRequestSummaryMasksSensitiveHeader(int* failures) {
+  dbgx::mcp::HttpRequest request;
+  request.method = "POST";
+  request.path = "/mcp";
+  request.headers.insert_or_assign("authorization", "Bearer super-secret-token");
+  request.body =
+      R"({"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"windbg.eval","arguments":{"command":"r eax"}}})";
+
+  const std::string summary = dbgx::mcp::BuildRequestIoSummary(request);
+
+  Expect(Contains(summary, "method=POST"), "request summary should include HTTP method", failures);
+  Expect(Contains(summary, "path=/mcp"), "request summary should include request path", failures);
+  Expect(Contains(summary, "rpc_method=tools/call"), "request summary should include JSON-RPC method", failures);
+  Expect(Contains(summary, "rpc_id=99"), "request summary should include JSON-RPC id", failures);
+  Expect(Contains(summary, "authorization=<masked>"), "request summary should mask authorization header", failures);
+  Expect(!Contains(summary, "super-secret-token"), "request summary must not expose authorization token", failures);
+}
+
+void TestIoEchoSummaryTruncatesLongPayload(int* failures) {
+  const std::string long_text(512, 'x');
+
+  dbgx::mcp::HttpResponse response;
+  response.status_code = 200;
+  response.body =
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + long_text +
+      "\"}]}}";
+
+  const std::string summary = dbgx::mcp::BuildResponseIoSummary(response);
+  Expect(Contains(summary, "...(truncated)"), "long response summary should be truncated", failures);
+}
+
+void TestIoEchoResponseSummaryCoversSuccessAndError(int* failures) {
+  dbgx::mcp::HttpResponse success_response;
+  success_response.status_code = 200;
+  success_response.body =
+      "{\"jsonrpc\":\"2.0\",\"id\":10,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}";
+
+  const std::string success_summary = dbgx::mcp::BuildResponseIoSummary(success_response);
+  Expect(Contains(success_summary, "rpc_outcome=success"), "success response should be marked as success", failures);
+
+  dbgx::mcp::HttpResponse error_response;
+  error_response.status_code = 200;
+  error_response.body =
+      "{\"jsonrpc\":\"2.0\",\"id\":10,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}";
+
+  const std::string error_summary = dbgx::mcp::BuildResponseIoSummary(error_response);
+  Expect(Contains(error_summary, "rpc_outcome=error"), "error response should be marked as error", failures);
+  Expect(Contains(error_summary, "-32600"), "error response summary should include JSON-RPC error code", failures);
+}
+
 }  // namespace
 
 int main() {
@@ -123,6 +174,9 @@ int main() {
   TestToolsCallMissingCommand(&failures);
   TestUnknownMethod(&failures);
   TestParseError(&failures);
+  TestIoEchoRequestSummaryMasksSensitiveHeader(&failures);
+  TestIoEchoSummaryTruncatesLongPayload(&failures);
+  TestIoEchoResponseSummaryCoversSuccessAndError(&failures);
 
   if (failures == 0) {
     std::cout << "All unit tests passed.\n";

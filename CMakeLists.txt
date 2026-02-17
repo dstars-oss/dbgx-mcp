@@ -23,6 +23,7 @@ string(REPLACE ";" "|" WINDBG_REQUIRED_EXPORTS_WITH_SENTINEL_ARG "${WINDBG_REQUI
 
 add_library(windbg_mcp_extension SHARED
   src/mcp/http_server.cpp
+  src/mcp/io_echo.cpp
   src/mcp/json.cpp
   src/mcp/json_rpc.cpp
   src/windbg/dbgeng_command_executor.cpp
@@ -62,6 +63,7 @@ add_custom_target(check_windbg_exports
 enable_testing()
 
 add_executable(unit_tests
+  src/mcp/io_echo.cpp
   src/mcp/json.cpp
   src/mcp/json_rpc.cpp
   tests/unit_tests.cpp
