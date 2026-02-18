@@ -20,7 +20,8 @@
 ## 影响
 
 - `CMakeLists.txt`: 可能新增导出符号清单接入或导出检查相关构建规则。
-- `src/windbg_mcp_extension.cpp`: 可能调整扩展入口导出声明与兼容性处理。
+- `src/dbgx-mcp.cpp`: 可能调整扩展入口导出声明与兼容性处理。
 - `README.md`: 增加 WinDbg `.load` 路径写法与错误码诊断说明。
 - `tests/` 或脚本工具: 增加导出符号/加载契约验证。
 - `openspec/specs/windbg-http-mcp-eval/spec.md`: 增量更新加载相关需求与场景。
+

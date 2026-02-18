@@ -1,4 +1,4 @@
-LIBRARY windbg_mcp_extension
+LIBRARY "dbgx-mcp"
 
 EXPORTS
   DebugExtensionInitialize

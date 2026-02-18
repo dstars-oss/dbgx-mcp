@@ -68,9 +68,7 @@ cmake --build build
 ```
 
 预期结果：
-- 扩展链输出中出现 `windbg_mcp_extension`。
-
-若仍有脚本使用 `windbg_mcp_extension.dll`，请改为 `dbgx-mcp.dll` 并重新构建后再加载。
+- 扩展链输出中出现 `dbgx-mcp`。
 
 ### 4. 发送首个 MCP 请求（`initialize`）
 

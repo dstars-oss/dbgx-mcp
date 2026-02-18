@@ -20,6 +20,7 @@
 
 ## 影响
 
-- 受影响代码：`src/windbg_mcp_extension.cpp`、`src/mcp/json_rpc.cpp`，以及可能新增的日志/格式化辅助代码。
+- 受影响代码：`src/dbgx-mcp.cpp`、`src/mcp/json_rpc.cpp`，以及可能新增的日志/格式化辅助代码。
 - 受影响测试：`tests/unit_tests.cpp` 与规格映射文档（如有）。
 - 运行影响：仅增加本地诊断输出，不改变对外 HTTP 端点与工具契约。
+

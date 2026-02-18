@@ -61,7 +61,7 @@ if(_missing_exports)
   message(FATAL_ERROR
     "Missing required exports: ${_missing_exports_text}\n"
     "Checked DLL: ${DLL_PATH}\n"
-    "Hint: ensure src/windbg_mcp_extension.def and exported function declarations stay aligned.\n"
+    "Hint: ensure src/dbgx-mcp.def and exported function declarations stay aligned.\n"
     "Export dump output:\n${_dump_stdout}")
 endif()
 

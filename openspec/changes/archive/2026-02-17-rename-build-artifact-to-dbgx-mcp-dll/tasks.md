@@ -9,7 +9,7 @@
 - [x] 2.2 更新发布/打包脚本与示例命令中的产物路径为 `dbgx-mcp.dll`
 - [x] 2.3 若存在历史兼容需求，评估并记录兼容或迁移说明
 
-- 已更新 `README.md` / `README.zh-CN.md` 的 `.load` 与 `dumpbin` 示例，并新增迁移说明：旧名称 `windbg_mcp_extension.dll` 已不再推荐使用。
+- 已更新 `README.md` / `README.zh-CN.md` 的 `.load` 与 `dumpbin` 示例，并新增迁移说明：旧名称 `dbgx-mcp.dll` 已不再推荐使用。
 
 ## 3. 验证
 
@@ -26,3 +26,4 @@
 
 - 证据：构建输出显示 `Linking CXX shared library dbgx-mcp.dll`。`WinDbg` 加载验证成功：`.load D:/Repos/Project/AI-Native/dbgx-mcp/.out/dbgx-mcp.dll` 后输出
   `[windbg-mcp] HTTP MCP server listening on http://127.0.0.1:5678/mcp`。
+

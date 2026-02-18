@@ -21,7 +21,8 @@
 
 ## 影响
 
-- 代码范围：`src/windbg_mcp_extension.cpp`、`src/mcp/io_echo.cpp`、可能涉及 `src/mcp/json_rpc.cpp` 与命令执行链路日志打点位置。
+- 代码范围：`src/dbgx-mcp.cpp`、`src/mcp/io_echo.cpp`、可能涉及 `src/mcp/json_rpc.cpp` 与命令执行链路日志打点位置。
 - 测试范围：更新/新增与日志输出格式、字段完整性、敏感信息脱敏、异常路径覆盖相关的单元测试。
 - 文档范围：README 中的诊断与示例日志片段可能需要同步更新。
 - 运行影响：主要是日志内容与格式调整，预计无对外 API 破坏。
+

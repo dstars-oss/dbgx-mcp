@@ -68,9 +68,7 @@ Important:
 ```
 
 Expected result:
-- `windbg_mcp_extension` appears in the extension chain output.
-
-If you still have automation scripts using `windbg_mcp_extension.dll`, replace them with `dbgx-mcp.dll` and rebuild to apply the rename.
+- `dbgx-mcp` appears in the extension chain output.
 
 ### 4. Send the first MCP request (`initialize`)
 
