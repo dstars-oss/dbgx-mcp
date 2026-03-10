@@ -67,7 +67,7 @@ Git tag (v0.1.0)
       → 解析 MAJOR.MINOR.PATCH
       → target_compile_definitions(dbgx-mcp PRIVATE DBGX_VERSION_STRING="${DBGX_VERSION}")
       → target_compile_definitions(unit_tests PRIVATE DBGX_VERSION_STRING="${DBGX_VERSION}")
-      → configure_file(src/version.rc.in src/version.rc)
+      → configure_file(src/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
       → set_target_properties(dbgx-mcp PROPERTIES VERSION ${DBGX_VERSION})
 ```
 
@@ -82,7 +82,7 @@ Git tag (v0.1.0)
 **版本体现位置（三处同步）：**
 
 1. **MCP `initialize` 响应** — `serverInfo.version` 返回 `DBGX_VERSION_STRING`
-2. **Windows DLL 版本资源** — `src/version.rc.in` 模板经 `configure_file` 生成 `src/version.rc`，结构如下：
+2. **Windows DLL 版本资源** — `src/version.rc.in` 模板经 `configure_file` 生成 `${CMAKE_CURRENT_BINARY_DIR}/version.rc`（即 `build/version.rc`），结构如下：
 
 ```rc
 // version.rc.in 模板轮廓
