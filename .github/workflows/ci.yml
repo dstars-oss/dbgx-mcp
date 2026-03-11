@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Verify DbgEng SDK
+        shell: pwsh
+        run: |
+          $found = $false
+          foreach ($dir in ($env:INCLUDE -split ';')) {
+            if ($dir -and (Test-Path (Join-Path $dir 'DbgEng.h'))) {
+              Write-Host "Found DbgEng.h in $dir"
+              $found = $true
+              break
+            }
+          }
+          if (-not $found) {
+            Write-Error "DbgEng.h not found in INCLUDE paths. DbgEng SDK may not be installed."
+            exit 1
+          }
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match '^refs/tags/v(.+)$') {
+            $ver = $Matches[1]
+          } else {
+            $ver = "0.0.0-dev"
+          }
+          Write-Host "Version: $ver"
+          echo "value=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Configure
+        run: cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug "-DDBGX_VERSION=${{ steps.version.outputs.value }}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload DLL artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbgx-mcp-dll
+          path: build/dbgx-mcp.dll
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" build/dbgx-mcp.dll --title "${{ github.ref_name }}" --generate-notes
