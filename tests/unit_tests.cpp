@@ -174,6 +174,8 @@ void TestInitialize(int* failures) {
   Expect(result.status_code == 200, "initialize should return HTTP 200", failures);
   Expect(Contains(result.body, "\"protocolVersion\":\"2025-11-25\""), "initialize should return protocol version", failures);
   Expect(Contains(result.body, "\"windbg.eval\""), "initialize should mention windbg.eval capability", failures);
+  Expect(Contains(result.body, "\"version\":\"" DBGX_VERSION_STRING "\""),
+         "initialize should return DBGX_VERSION_STRING in serverInfo", failures);
 }
 
 void TestToolsList(int* failures) {
