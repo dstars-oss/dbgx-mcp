@@ -50,7 +50,7 @@ MethodOutcome HandleInitialize() {
       "{"
       "\"protocolVersion\":\"2025-11-25\","
       "\"capabilities\":{\"tools\":{\"listChanged\":false,\"availableTools\":[\"windbg.eval\"]}},"
-      "\"serverInfo\":{\"name\":\"dbgx-mcp\",\"version\":\"0.1.0\"}"
+      "\"serverInfo\":{\"name\":\"dbgx-mcp\",\"version\":\"" DBGX_VERSION_STRING "\"}"
       "}";
   return outcome;
 }
