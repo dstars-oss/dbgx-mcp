@@ -21,6 +21,12 @@ else()
   set(DBGX_VERSION_PATCH 0)
 endif()
 
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/version.rc"
+  @ONLY
+)
+
 set(WINDBG_EXTENSION_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/dbgx-mcp.def")
 set(WINDBG_EXPORT_CHECK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_windbg_exports.cmake")
 set(WINDBG_EXTENSION_OUTPUT_NAME "dbgx-mcp")
@@ -45,6 +51,7 @@ add_library(dbgx-mcp SHARED
   src/windbg/dbgeng_command_executor.cpp
   src/dbgx-mcp.cpp
   src/dbgx-mcp.def
+  "${CMAKE_CURRENT_BINARY_DIR}/version.rc"
 )
 
 set_target_properties(dbgx-mcp PROPERTIES
