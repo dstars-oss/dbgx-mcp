@@ -6,6 +6,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# --- Version management ---
+set(DBGX_VERSION "0.0.0-dev" CACHE STRING "Project version (injected by CI from git tag)")
+
+# Parse MAJOR.MINOR.PATCH for version.rc
+string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _version_match "${DBGX_VERSION}")
+if(_version_match)
+  set(DBGX_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(DBGX_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(DBGX_VERSION_PATCH "${CMAKE_MATCH_3}")
+else()
+  set(DBGX_VERSION_MAJOR 0)
+  set(DBGX_VERSION_MINOR 0)
+  set(DBGX_VERSION_PATCH 0)
+endif()
+
 set(WINDBG_EXTENSION_DEF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/dbgx-mcp.def")
 set(WINDBG_EXPORT_CHECK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_windbg_exports.cmake")
 set(WINDBG_EXTENSION_OUTPUT_NAME "dbgx-mcp")
@@ -36,6 +51,7 @@ set_target_properties(dbgx-mcp PROPERTIES
   OUTPUT_NAME ${WINDBG_EXTENSION_OUTPUT_NAME}
   OUTPUT_NAME_DEBUG ${WINDBG_EXTENSION_OUTPUT_NAME}
   OUTPUT_NAME_RELEASE ${WINDBG_EXTENSION_OUTPUT_NAME}
+  VERSION ${DBGX_VERSION}
 )
 
 target_include_directories(dbgx-mcp PRIVATE include)
@@ -43,6 +59,7 @@ target_include_directories(dbgx-mcp PRIVATE include)
 target_compile_definitions(dbgx-mcp PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
+  DBGX_VERSION_STRING="${DBGX_VERSION}"
 )
 
 target_link_libraries(dbgx-mcp PRIVATE
@@ -79,6 +96,10 @@ add_executable(unit_tests
 
 target_include_directories(unit_tests PRIVATE include)
 target_link_libraries(unit_tests PRIVATE ws2_32)
+
+target_compile_definitions(unit_tests PRIVATE
+  DBGX_VERSION_STRING="${DBGX_VERSION}"
+)
 
 add_test(NAME unit_tests COMMAND unit_tests)
 
