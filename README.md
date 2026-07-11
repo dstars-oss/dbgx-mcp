@@ -2,6 +2,8 @@
 
 Language: English | [简体中文](README.zh-CN.md)
 
+> 当前工程不再维护，使用我的新项目：https://github.com/dstars-oss/dbgatlas
+
 ## Project Overview
 
 This project provides a minimal C++ WinDbg extension DLL that exposes an MCP-compatible HTTP endpoint (`/mcp`) and a basic `windbg.eval` tool.
